@@ -407,6 +407,26 @@ snapshots; OpenClaw owns all persistence and lifecycle coordination.
     before choosing this path from tools that can also run in standalone agent processes.
 
   </Accordion>
+  <Accordion title="api.runtime.talk">
+    Open a realtime voice conversation using the Gateway's configured Talk provider and agent.
+    OpenClaw handles turn timing, interruptions, and agent tool use; the plugin sends microphone
+    PCM and renders the returned events.
+
+    ```typescript
+    const session = await api.runtime.talk.openSession({
+      sessionKey: "agent:main:avatar",
+      onEvent: (event) => renderVoiceEvent(event),
+    });
+
+    session.sendAudio(pcm16le24kMono);
+    session.cancelOutput("barge-in");
+    session.close();
+    ```
+
+    This method is available to trusted plugin request routes that declare the
+    `gatewayMethodDispatch` contract. Output audio is 24 kHz mono PCM16.
+
+  </Accordion>
   <Accordion title="api.runtime.subagent">
     Launch and manage background subagent runs.
 
