@@ -423,8 +423,8 @@ snapshots; OpenClaw owns all persistence and lifecycle coordination.
     session.close();
     ```
 
-    This method is available to trusted plugin request routes that declare the
-    `gatewayMethodDispatch` contract. Output audio is 24 kHz mono PCM16.
+    This method is available to Gateway-authenticated plugin routes with Talk access that declare
+    the `gatewayMethodDispatch` contract. Output audio is 24 kHz mono PCM16.
 
   </Accordion>
   <Accordion title="api.runtime.subagent">

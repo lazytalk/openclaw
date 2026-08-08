@@ -7,6 +7,7 @@ import {
   type PluginTalkSession,
   type PluginTalkSessionEvent,
 } from "../talk/plugin-session.js";
+import { authorizeOperatorScopesForMethod } from "./method-scopes.js";
 import type { TalkRealtimeRelayEvent } from "./talk-realtime-relay-state.js";
 import {
   cancelTalkRealtimeRelayTurn,
@@ -22,6 +23,12 @@ function requirePluginTalkScope() {
   if (!scope?.context || !scope.pluginId || scope.gatewayMethodDispatchAllowed !== true) {
     throw new Error(
       "Interactive Talk sessions require a plugin request route that declares the gatewayMethodDispatch contract.",
+    );
+  }
+  const operatorScopes = scope.client?.connect.scopes ?? [];
+  if (!authorizeOperatorScopesForMethod("talk.session.create", operatorScopes).allowed) {
+    throw new Error(
+      "Interactive Talk sessions require an authenticated plugin request with Talk access.",
     );
   }
   return { context: scope.context, pluginId: scope.pluginId };
@@ -153,7 +160,7 @@ export async function openPluginTalkSession(
   });
   lifecycle.relaySessionId = session.relaySessionId;
   if (deliveryError) {
-    stopTalkRealtimeRelaySession({ relaySessionId, connId: ownerId });
+    stopTalkRealtimeRelaySession({ relaySessionId: session.relaySessionId, connId: ownerId });
     throw deliveryError;
   }
 

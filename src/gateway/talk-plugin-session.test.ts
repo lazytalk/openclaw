@@ -29,6 +29,7 @@ describe("plugin Talk session", () => {
     mocks.scope.mockReturnValue({
       pluginId: "avatar",
       gatewayMethodDispatchAllowed: true,
+      client: { connect: { scopes: ["operator.talk"] } },
       context: { logGateway: { warn: mocks.warn } },
     });
     mocks.createSession.mockResolvedValue({ relaySessionId: "relay-1" });
@@ -134,6 +135,41 @@ describe("plugin Talk session", () => {
       relaySessionId: "relay-1",
       connId: createParams.ownerId,
     });
+  });
+
+  it("closes a session whose event callback fails during creation", async () => {
+    mocks.createSession.mockImplementationOnce(async (params) => {
+      params.eventSink({ relaySessionId: "relay-1", type: "ready" });
+      return { relaySessionId: "relay-1" };
+    });
+
+    await expect(
+      openPluginTalkSession({
+        sessionKey: "agent:main:avatar",
+        onEvent: () => {
+          throw new Error("renderer gone");
+        },
+      }),
+    ).rejects.toThrow("renderer gone");
+
+    expect(mocks.stopSession).toHaveBeenCalledWith({
+      relaySessionId: "relay-1",
+      connId: expect.stringMatching(/^plugin:avatar:/),
+    });
+  });
+
+  it("rejects plugin routes without Talk access", async () => {
+    mocks.scope.mockReturnValue({
+      pluginId: "avatar",
+      gatewayMethodDispatchAllowed: true,
+      client: { connect: { scopes: ["operator.read"] } },
+      context: { logGateway: { warn: mocks.warn } },
+    });
+
+    await expect(
+      openPluginTalkSession({ sessionKey: "agent:main:avatar", onEvent: vi.fn() }),
+    ).rejects.toThrow("authenticated plugin request with Talk access");
+    expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
   it("requires an entitled request scope and a selected agent session", async () => {
