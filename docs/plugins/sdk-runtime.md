@@ -423,8 +423,21 @@ snapshots; OpenClaw owns all persistence and lifecycle coordination.
     session.close();
     ```
 
+    Both `sendAudio()` input and `audio` event output use PCM16LE, 24 kHz, mono audio. The callback
+    receives:
+
+    - `state` when the session starts listening, thinking, speaking, or enters an error state
+    - ordered `audio` chunks with generation, sequence, and presentation timestamps
+    - `clear` when buffered output from an earlier generation must be discarded
+    - one terminal `closed` event
+
+    After `closed`, `sendAudio()` throws while `cancelOutput()` and `close()` do nothing. A thrown or
+    rejected callback closes the relay; if it fails during setup, `openSession()` rejects. Reopen a
+    session only after installing a working callback.
+
     This method is available to Gateway-authenticated plugin routes with Talk access that declare
-    the `gatewayMethodDispatch` contract. Output audio is 24 kHz mono PCM16.
+    the `gatewayMethodDispatch` contract. Unauthorized calls reject before opening a provider
+    session; configure the route with `auth: "gateway"` and grant Talk access before retrying.
 
   </Accordion>
   <Accordion title="api.runtime.subagent">
