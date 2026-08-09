@@ -1,8 +1,11 @@
-export const PLUGIN_TALK_AUDIO_FORMAT = {
-  encoding: "pcm16le",
-  sampleRateHz: 24_000,
-  channels: 1,
-} as const;
+import {
+  REALTIME_VOICE_AUDIO_FORMAT_PCM16_24KHZ,
+  type RealtimeVoiceAudioFormat,
+} from "./provider-types.js";
+
+export const PLUGIN_TALK_AUDIO_FORMAT: Readonly<
+  Extract<RealtimeVoiceAudioFormat, { encoding: "pcm16" }>
+> = REALTIME_VOICE_AUDIO_FORMAT_PCM16_24KHZ;
 
 export type PluginTalkSessionEvent =
   | {
@@ -21,12 +24,12 @@ export type PluginTalkSessionEvent =
   | {
       type: "clear";
       generation: number;
-      reason: "barge-in" | "cancel" | "replace" | "hangup" | "error";
+      reason: "barge-in" | "cancel";
     }
   | {
       type: "closed";
       generation: number;
-      reason: "completed" | "error" | "replaced";
+      reason: "completed" | "error";
     };
 
 export type OpenPluginTalkSessionParams = {

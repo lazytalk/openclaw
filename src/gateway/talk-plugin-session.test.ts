@@ -29,7 +29,10 @@ describe("plugin Talk session", () => {
     mocks.scope.mockReturnValue({
       pluginId: "avatar",
       gatewayMethodDispatchAllowed: true,
-      client: { connect: { scopes: ["operator.talk"] } },
+      client: {
+        connId: "plugin-http:127.0.0.1",
+        connect: { scopes: ["operator.talk"] },
+      },
       context: { logGateway: { warn: mocks.warn } },
     });
     mocks.createSession.mockResolvedValue({ relaySessionId: "relay-1" });
@@ -48,7 +51,7 @@ describe("plugin Talk session", () => {
       context: { logGateway: { warn: mocks.warn } },
       request: { sessionKey: "agent:main:avatar", voice: "alloy" },
     });
-    expect(createParams.ownerId).toMatch(/^plugin:avatar:/);
+    expect(createParams.ownerId).toBe("plugin:avatar:plugin-http:127.0.0.1");
 
     createParams.eventSink({ relaySessionId: "relay-1", type: "ready" });
     createParams.eventSink({ relaySessionId: "relay-1", type: "audioStarted" });
@@ -92,6 +95,16 @@ describe("plugin Talk session", () => {
       relaySessionId: "relay-1",
       connId: createParams.ownerId,
     });
+  });
+
+  it("shares the route owner across opens so relay session limits apply", async () => {
+    await openPluginTalkSession({ sessionKey: "agent:main:first", onEvent: vi.fn() });
+    await openPluginTalkSession({ sessionKey: "agent:main:second", onEvent: vi.fn() });
+
+    expect(mocks.createSession.mock.calls.map(([params]) => params.ownerId)).toEqual([
+      "plugin:avatar:plugin-http:127.0.0.1",
+      "plugin:avatar:plugin-http:127.0.0.1",
+    ]);
   });
 
   it("stops accepting media after the Gateway closes the session", async () => {
@@ -154,7 +167,7 @@ describe("plugin Talk session", () => {
 
     expect(mocks.stopSession).toHaveBeenCalledWith({
       relaySessionId: "relay-1",
-      connId: expect.stringMatching(/^plugin:avatar:/),
+      connId: "plugin:avatar:plugin-http:127.0.0.1",
     });
   });
 
@@ -162,7 +175,10 @@ describe("plugin Talk session", () => {
     mocks.scope.mockReturnValue({
       pluginId: "avatar",
       gatewayMethodDispatchAllowed: true,
-      client: { connect: { scopes: ["operator.read"] } },
+      client: {
+        connId: "plugin-http:127.0.0.1",
+        connect: { scopes: ["operator.read"] },
+      },
       context: { logGateway: { warn: mocks.warn } },
     });
 

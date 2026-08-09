@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { formatErrorMessage } from "../infra/errors.js";
 import { getPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
 import {
@@ -20,7 +19,12 @@ const PCM16_24KHZ_MONO_BYTES_PER_MS = 48;
 
 function requirePluginTalkScope() {
   const scope = getPluginRuntimeGatewayRequestScope();
-  if (!scope?.context || !scope.pluginId || scope.gatewayMethodDispatchAllowed !== true) {
+  if (
+    !scope?.context ||
+    !scope.pluginId ||
+    !scope.client?.connId ||
+    scope.gatewayMethodDispatchAllowed !== true
+  ) {
     throw new Error(
       "Interactive Talk sessions require a plugin request route that declares the gatewayMethodDispatch contract.",
     );
@@ -31,7 +35,10 @@ function requirePluginTalkScope() {
       "Interactive Talk sessions require an authenticated plugin request with Talk access.",
     );
   }
-  return { context: scope.context, pluginId: scope.pluginId };
+  return {
+    context: scope.context,
+    ownerId: `plugin:${scope.pluginId}:${scope.client.connId}`,
+  };
 }
 
 function createPluginTalkEventSink(
@@ -129,8 +136,7 @@ export async function openPluginTalkSession(
       "Choose an OpenClaw session before starting voice so the conversation uses the intended agent and workspace.",
     );
   }
-  const { context, pluginId } = requirePluginTalkScope();
-  const ownerId = `plugin:${pluginId}:${randomUUID()}`;
+  const { context, ownerId } = requirePluginTalkScope();
   const lifecycle: { relaySessionId?: string } = {};
   let deliveryError: unknown;
   const events = createPluginTalkEventSink(params, (error) => {

@@ -423,13 +423,20 @@ snapshots; OpenClaw owns all persistence and lifecycle coordination.
     session.close();
     ```
 
-    Both `sendAudio()` input and `audio` event output use PCM16LE, 24 kHz, mono audio. The callback
-    receives:
+    `sessionKey` selects the agent conversation and workspace. `provider`, `model`, `voice`, and
+    `language` optionally override its configured Talk defaults. Input and output use signed
+    PCM16 little-endian audio at 24 kHz, mono (`session.audio.encoding` is `"pcm16"`).
 
-    - `state` when the session starts listening, thinking, speaking, or enters an error state
-    - ordered `audio` chunks with generation, sequence, and presentation timestamps
-    - `clear` when buffered output from an earlier generation must be discarded
-    - one terminal `closed` event
+    `sendAudio()` accepts an optional `timestamp`: the current output playback position in
+    milliseconds, used to trim interrupted speech. The callback receives:
+
+    - `state` (`idle`, `listening`, `thinking`, `speaking`, or `error`); `ptsMs` is the current
+      output position in milliseconds
+    - ordered `audio` chunks; `sequence` starts at zero and `ptsMs` is the chunk's presentation
+      time in milliseconds
+    - `clear`, with `barge-in` when the user interrupts or `cancel` for another cancellation;
+      discard buffered audio from older generations
+    - one terminal `closed`, with `completed` for a normal close or `error` after a failure
 
     After `closed`, `sendAudio()` throws while `cancelOutput()` and `close()` do nothing. A thrown or
     rejected callback closes the relay; if it fails during setup, `openSession()` rejects. Reopen a
