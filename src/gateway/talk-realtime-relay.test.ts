@@ -226,6 +226,82 @@ describe("talk realtime gateway relay", () => {
     };
   }
 
+  it("delivers owner events to the local sink and Gateway connection", () => {
+    const eventSink = vi.fn();
+    const broadcastToConnIds = vi.fn();
+    const session = createTalkRealtimeRelaySession({
+      context: {
+        broadcastToConnIds,
+        getRuntimeConfig: () => ({}),
+        logGateway: { warn: vi.fn() },
+      } as never,
+      connId: "conn-local-sink",
+      eventSink,
+      provider: createIdleRelayProvider(),
+      providerConfig: {},
+      instructions: "brief",
+      tools: [],
+    });
+
+    sendTalkRealtimeRelayAudio({
+      relaySessionId: session.relaySessionId,
+      connId: "conn-local-sink",
+      audioBase64: Buffer.from([1, 2]).toString("base64"),
+    });
+
+    expect(eventSink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        relaySessionId: session.relaySessionId,
+        type: "inputAudio",
+        byteLength: 2,
+      }),
+    );
+    expect(broadcastToConnIds).toHaveBeenCalledWith(
+      "talk.event",
+      expect.objectContaining({ relaySessionId: session.relaySessionId, type: "inputAudio" }),
+      new Set(["conn-local-sink"]),
+      { dropIfSlow: true },
+    );
+  });
+
+  it("keeps Gateway and provider delivery alive when the local sink throws", () => {
+    const sendAudio = vi.fn();
+    const provider = createIdleRelayProvider();
+    provider.createBridge = () => makeRelayTransport({ sendAudio });
+    const broadcastToConnIds = vi.fn();
+    const warn = vi.fn();
+    const session = createTalkRealtimeRelaySession({
+      context: {
+        broadcastToConnIds,
+        getRuntimeConfig: () => ({}),
+        logGateway: { warn },
+      } as never,
+      connId: "conn-throwing-sink",
+      eventSink: () => {
+        throw new Error("renderer gone");
+      },
+      provider,
+      providerConfig: {},
+      instructions: "brief",
+      tools: [],
+    });
+
+    sendTalkRealtimeRelayAudio({
+      relaySessionId: session.relaySessionId,
+      connId: "conn-throwing-sink",
+      audioBase64: Buffer.from([1, 2]).toString("base64"),
+    });
+
+    expect(warn).toHaveBeenCalledWith("talk realtime event sink failed: renderer gone");
+    expect(broadcastToConnIds).toHaveBeenCalledWith(
+      "talk.event",
+      expect.objectContaining({ relaySessionId: session.relaySessionId, type: "inputAudio" }),
+      new Set(["conn-throwing-sink"]),
+      { dropIfSlow: true },
+    );
+    expect(sendAudio).toHaveBeenCalledWith(Buffer.from([1, 2]));
+  });
+
   it("closes only realtime relays owned by the disconnected connection", async () => {
     const envSnapshot = captureEnv(["OPENCLAW_STATE_DIR"]);
     const tempDir = tempDirs.make("openclaw-relay-disconnect-");
@@ -4816,6 +4892,39 @@ describe("talk realtime gateway relay", () => {
       inputEncoding: "pcm16",
       outputEncoding: "pcm16",
     });
+  });
+
+  it("keeps plugin quotas stable while cleaning up each consuming connection", () => {
+    const provider: RealtimeVoiceProviderPlugin = {
+      id: "relay-test",
+      label: "Relay Test",
+      isConfigured: () => true,
+      createBridge: () => makeRelayTransport(),
+    };
+    const context = {
+      broadcastToConnIds: vi.fn(),
+      logGateway: { warn: vi.fn() },
+    } as never;
+    const createSession = (connId: string) =>
+      createTalkRealtimeRelaySession({
+        context,
+        connId,
+        quotaOwnerId: "plugin:avatar:plugin-http:127.0.0.1",
+        provider,
+        providerConfig: {},
+        instructions: "brief",
+        tools: [],
+      });
+
+    const first = createSession("plugin:avatar:lifecycle-1");
+    createSession("plugin:avatar:lifecycle-2");
+    expect(() => createSession("plugin:avatar:lifecycle-3")).toThrow(
+      "Too many active realtime relay sessions for this connection",
+    );
+
+    cleanupTalkConnection("plugin:avatar:lifecycle-1", context.logGateway);
+    expect(relaySessions.has(first.relaySessionId)).toBe(false);
+    expect(() => createSession("plugin:avatar:lifecycle-3")).not.toThrow();
   });
 });
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
