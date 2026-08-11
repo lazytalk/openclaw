@@ -215,6 +215,7 @@ export type RelaySession = {
   voiceTranscriptSeq: number;
   voiceTranscriptQueue: BoundedSerialQueue;
   voiceSessionClose?: Promise<void>;
+  unregisterConnectionCleanup?: () => void;
   failSession: (message: string) => void;
   pendingVoiceTranscripts: Array<{ role: "user" | "assistant"; text: string }>;
 };

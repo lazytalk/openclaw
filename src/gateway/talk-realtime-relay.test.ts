@@ -24,7 +24,12 @@ import type {
 } from "../talk/provider-types.js";
 import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
 import { createChatRunState } from "./server-chat-state.js";
-import { drainingRelaySessions, relaySessions } from "./talk-realtime-relay-state.js";
+import { closeTalkRealtimeRelaySessionsForConnection } from "./talk-realtime-relay-operations.js";
+import {
+  RELAY_SESSION_TTL_MS,
+  drainingRelaySessions,
+  relaySessions,
+} from "./talk-realtime-relay-state.js";
 import { MAX_RELAY_TOOL_CALL_IDENTITIES } from "./talk-realtime-relay-tool-call-ledger.js";
 import {
   acknowledgeTalkRealtimeRelayMark,
@@ -38,7 +43,7 @@ import {
   stopTalkRealtimeRelaySession as stopTalkRealtimeRelaySessionRaw,
   submitTalkRealtimeRelayToolResult,
 } from "./talk-realtime-relay.js";
-import { cleanupTalkConnection } from "./talk-session-registry.js";
+import { cleanupTalkConnection, registerTalkConnectionCleanup } from "./talk-session-registry.js";
 
 const activeRelaySessions = new Map<string, string>();
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -4925,6 +4930,57 @@ describe("talk realtime gateway relay", () => {
     cleanupTalkConnection("plugin:avatar:lifecycle-1", context.logGateway);
     expect(relaySessions.has(first.relaySessionId)).toBe(false);
     expect(() => createSession("plugin:avatar:lifecycle-3")).not.toThrow();
+  });
+
+  it("releases plugin cleanup owners on stop, provider close, and expiry", () => {
+    let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
+    const provider: RealtimeVoiceProviderPlugin = {
+      id: "relay-test",
+      label: "Relay Test",
+      isConfigured: () => true,
+      createBridge: (request) => {
+        bridgeRequest = request;
+        return makeRelayTransport();
+      },
+    };
+    const context = {
+      broadcastToConnIds: vi.fn(),
+      getRuntimeConfig: () => ({}),
+      logGateway: { warn: vi.fn() },
+    } as never;
+    const createSession = (connId: string) =>
+      createTalkRealtimeRelaySession({
+        context,
+        connId,
+        quotaOwnerId: "plugin:avatar:plugin-http:127.0.0.1",
+        provider,
+        providerConfig: {},
+        instructions: "brief",
+        tools: [],
+      });
+    const expectCleanupOwnerReleased = (connId: string) => {
+      const staleCleanup = vi.fn();
+      const releaseProbe = registerTalkConnectionCleanup(connId, "realtime-relay", staleCleanup);
+      releaseProbe();
+      cleanupTalkConnection(connId, context.logGateway);
+      expect(staleCleanup).not.toHaveBeenCalled();
+    };
+
+    const stopped = createSession("plugin:avatar:stopped");
+    stopTalkRealtimeRelaySession({
+      relaySessionId: stopped.relaySessionId,
+      connId: "plugin:avatar:stopped",
+    });
+    expectCleanupOwnerReleased("plugin:avatar:stopped");
+
+    createSession("plugin:avatar:provider-closed");
+    bridgeRequest?.onClose?.("completed");
+    expectCleanupOwnerReleased("plugin:avatar:provider-closed");
+
+    vi.useFakeTimers();
+    createSession("plugin:avatar:expired");
+    vi.advanceTimersByTime(RELAY_SESSION_TTL_MS);
+    expectCleanupOwnerReleased("plugin:avatar:expired");
   });
 });
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

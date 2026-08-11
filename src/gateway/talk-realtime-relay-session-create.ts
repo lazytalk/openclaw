@@ -648,9 +648,13 @@ export function createTalkRealtimeRelaySession(
   relayRef.current = relay;
   relay.cleanupTimer.unref?.();
   relaySessions.set(relaySessionId, relay);
-  registerTalkConnectionCleanup(params.connId, "realtime-relay", () => {
-    closeTalkRealtimeRelaySessionsForConnection(params.connId);
-  });
+  relay.unregisterConnectionCleanup = registerTalkConnectionCleanup(
+    params.connId,
+    "realtime-relay",
+    () => {
+      closeTalkRealtimeRelaySessionsForConnection(params.connId);
+    },
+  );
   bridge.connect().catch((error: unknown) => {
     const active = relaySessions.get(relaySessionId);
     if (active !== relay) {

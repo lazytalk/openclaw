@@ -113,6 +113,8 @@ export function closeRelaySession(
   session.harness.close();
   session.outputOwnership.drain?.resolve();
   relaySessions.delete(session.id);
+  session.unregisterConnectionCleanup?.();
+  session.unregisterConnectionCleanup = undefined;
   forgetUnifiedTalkSession(session.id);
   clearTimeout(session.cleanupTimer);
   if (disposition === "detach") {
