@@ -696,6 +696,7 @@ export async function registerSlackMonitorSlashCommands(params: {
           command: commandDefinition,
           args: commandArgs,
           cfg,
+          agentId: menuRoute?.agentId,
           ...menuModelContext,
           ...(menuModelCatalog?.length ? { catalog: menuModelCatalog } : {}),
         });

@@ -548,22 +548,31 @@ describe("commands registry", () => {
       cfg: {
         agents: {
           defaults: {
-            model: "openai-codex/gpt-5.5",
+            model: "openai/gpt-5.5",
             models: {
-              "openai-codex/gpt-5.5": {
+              "openai/gpt-5.5": {
                 params: { fastMode: "auto", fastAutoOnSeconds: 30 },
+              },
+            },
+          },
+          entries: {
+            audit: {
+              params: { fastAutoOnSeconds: 20 },
+              models: {
+                "openai/gpt-5.5": { params: { fast_seconds: 15 } },
               },
             },
           },
         },
       } as never,
-      provider: "openai-codex",
+      provider: "openai",
       model: "gpt-5.5",
+      agentId: "audit",
     });
     expect(menu.choices).toEqual([
       { label: "on", value: "on" },
       { label: "off", value: "off" },
-      { label: "auto (30 sec)", value: "auto" },
+      { label: "auto (15 sec)", value: "auto" },
       { label: "default", value: "default" },
       { label: "status", value: "status" },
     ]);

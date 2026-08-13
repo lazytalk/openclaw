@@ -76,7 +76,6 @@ describe("OpenAI realtime voice provider routing", () => {
         { encoding: "g711_ulaw", sampleRateHz: 8000, channels: 1 },
         { encoding: "pcm16", sampleRateHz: 24000, channels: 1 },
       ],
-      supportsActivationNameGating: true,
       supportsBrowserSession: true,
       supportsBargeIn: true,
       handlesInputAudioBargeIn: true,

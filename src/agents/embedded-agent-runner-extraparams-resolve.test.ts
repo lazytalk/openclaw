@@ -2,29 +2,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveExtraParams } from "./embedded-agent-runner/extra-params.js";
 
-const AGENT_MODEL_PARAM_CASES = [
-  {
-    provider: "openai",
-    modelId: "gpt-5.6-luna",
-    params: { temperature: 0.1, topP: 0.2, serviceTier: "priority", transport: "websocket" },
-  },
-  {
-    provider: "anthropic",
-    modelId: "claude-sonnet-4-6",
-    params: { temperature: 0.2, topP: 0.3, maxTokens: 321, cacheRetention: "short" },
-  },
-  {
-    provider: "google",
-    modelId: "gemini-2.5-pro",
-    params: { temperature: 0.3, topP: 0.4, cachedContent: "cachedContents/agent-model-proof" },
-  },
-  {
-    provider: "google-vertex",
-    modelId: "gemini-2.5-pro",
-    params: { temperature: 0.4, topP: 0.5, maxTokens: 456 },
-  },
-];
-
 describe("resolveExtraParams", () => {
   it("returns undefined with no model config", () => {
     const result = resolveExtraParams({
@@ -162,108 +139,72 @@ describe("resolveExtraParams", () => {
     });
   });
 
-  it.each(AGENT_MODEL_PARAM_CASES)(
-    "applies canonical agent-specific model params for $provider/$modelId",
-    ({ provider, modelId, params }) => {
-      const modelRef = `${provider}/${modelId}`;
-      const result = resolveExtraParams({
-        cfg: {
-          agents: {
-            entries: {
-              audit: {
-                models: { [modelRef]: { params } },
-              },
-            },
-          },
-        },
-        provider,
-        modelId,
-        agentId: "audit",
-      });
-
-      expect(result).toEqual(expect.objectContaining(params));
-    },
-  );
-
-  it.each(AGENT_MODEL_PARAM_CASES)(
-    "applies the narrowest agent-specific model precedence for $provider/$modelId",
-    ({ provider, modelId, params }) => {
-      const modelRef = `${provider}/${modelId}`;
-      const result = resolveExtraParams({
-        cfg: {
-          agents: {
-            defaults: {
-              params: { temperature: 0.9, topP: 0.9, cacheRetention: "long" },
-              models: {
-                [modelRef]: {
-                  params: { temperature: 0.8, topP: 0.8, maxTokens: 2048 },
-                },
-              },
-            },
-            entries: {
-              audit: {
-                params: { temperature: 0.7, cacheRetention: "none" },
-                models: { [modelRef]: { params } },
-              },
-            },
-          },
-        },
-        provider,
-        modelId,
-        agentId: "audit",
-      });
-
-      expect(result).toEqual(
-        expect.objectContaining({
-          maxTokens: 2048,
-          cacheRetention: "none",
-          ...params,
-        }),
-      );
-    },
-  );
-
-  it("ignores model params belonging to another agent", () => {
+  it("applies agent-model params at the narrowest config precedence", () => {
     const result = resolveExtraParams({
       cfg: {
         agents: {
-          entries: {
-            audit: {
-              models: {
-                "anthropic/claude-sonnet-4-6": { params: { temperature: 0.2 } },
+          defaults: {
+            params: { temperature: 0.9, topP: 0.9, cacheRetention: "long" },
+            models: {
+              "anthropic/claude-sonnet-4-6": {
+                params: { temperature: 0.8, topP: 0.8, maxTokens: 2048 },
               },
             },
-            main: {},
+          },
+          entries: {
+            audit: {
+              params: { temperature: 0.7, cacheRetention: "none" },
+              models: {
+                "anthropic/claude-sonnet-4-6": {
+                  params: { temperature: 0.2, topP: 0.3, maxTokens: 321 },
+                },
+              },
+            },
           },
         },
       },
       provider: "anthropic",
       modelId: "claude-sonnet-4-6",
-      agentId: "main",
+      agentId: "audit",
     });
 
-    expect(result).toBeUndefined();
+    expect(result).toEqual({
+      temperature: 0.2,
+      topP: 0.3,
+      maxTokens: 321,
+      cacheRetention: "none",
+    });
   });
 
-  it("ignores the selected agent's params for another model", () => {
-    const result = resolveExtraParams({
-      cfg: {
-        agents: {
-          entries: {
-            audit: {
-              models: {
-                "anthropic/claude-sonnet-4-6": { params: { temperature: 0.2 } },
-              },
+  it("isolates agent-model params to the selected agent and model", () => {
+    const cfg = {
+      agents: {
+        entries: {
+          audit: {
+            models: {
+              "anthropic/claude-sonnet-4-6": { params: { temperature: 0.2 } },
             },
           },
+          main: {},
         },
       },
+    };
+
+    const otherAgent = resolveExtraParams({
+      cfg,
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-6",
+      agentId: "main",
+    });
+    const otherModel = resolveExtraParams({
+      cfg,
       provider: "anthropic",
       modelId: "claude-opus-4-6",
       agentId: "audit",
     });
 
-    expect(result).toBeUndefined();
+    expect(otherAgent).toBeUndefined();
+    expect(otherModel).toBeUndefined();
   });
 
   it("preserves higher-precedence agent parallelToolCalls override across alias styles", () => {

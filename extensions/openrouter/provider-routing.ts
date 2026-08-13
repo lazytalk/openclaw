@@ -1,4 +1,5 @@
 // Openrouter provider module implements model/runtime integration.
+import { mergeDeep } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { normalizeProviderId } from "openclaw/plugin-sdk/provider-model-shared";
 
 type OpenRouterProviderConfig = {
@@ -49,22 +50,6 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
   return Object.keys(sanitized).length > 0 ? sanitized : undefined;
 }
 
-function mergeOpenRouterProviderConfigParams(
-  previous: Record<string, unknown> | undefined,
-  next: Record<string, unknown>,
-): Record<string, unknown> {
-  const merged = { ...previous };
-  for (const [key, value] of Object.entries(next)) {
-    const previousRecord = readRecord(merged[key]);
-    const nextRecord = readRecord(value);
-    merged[key] =
-      previousRecord && nextRecord
-        ? mergeOpenRouterProviderConfigParams(previousRecord, nextRecord)
-        : value;
-  }
-  return merged;
-}
-
 function resolveOpenRouterProviderConfigParams(
   ctx: OpenRouterExtraParamsContext,
 ): Record<string, unknown> | undefined {
@@ -88,7 +73,7 @@ function resolveOpenRouterProviderConfigParams(
   for (const [, config] of prioritizedProviders) {
     const params = readRecord(config.params);
     if (params) {
-      matchedParams = mergeOpenRouterProviderConfigParams(matchedParams, params);
+      matchedParams = mergeDeep(matchedParams ?? {}, params) as Record<string, unknown>;
     }
   }
   return matchedParams;

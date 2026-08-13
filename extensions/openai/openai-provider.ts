@@ -950,6 +950,14 @@ export function buildOpenAIProvider(): ProviderPlugin {
           return null;
         }
         const auth = ctx.resolveProviderAuth(PROVIDER_ID);
+        const selectedApiKey =
+          auth.mode === "api_key" && auth.apiKey
+            ? {
+                apiKey: auth.apiKey,
+                discoveryApiKey: auth.discoveryApiKey,
+                profileId: auth.profileId,
+              }
+            : undefined;
         // Catalog auth is already selected. Re-resolving an explicit API key
         // would let an unrelated OAuth profile replace its account and models.
         if (auth.mode !== "api_key") {
@@ -994,29 +1002,18 @@ export function buildOpenAIProvider(): ProviderPlugin {
             // auth can still publish the standard OpenAI catalog.
           }
         }
-        if (auth.mode === "api_key" && auth.apiKey) {
-          const catalog = scopeOpenAICatalogOutcome(
-            await buildOpenAILiveProviderConfig({
-              apiKey: auth.apiKey,
-              baseUrl: resolveOpenAICatalogBaseUrl(ctx),
-              discoveryApiKey: auth.discoveryApiKey,
-            }),
-            auth.profileId,
-          );
-          return {
-            providers: { [PROVIDER_ID]: catalog.provider },
-            ...(catalog.outcome ? { outcomes: [catalog.outcome] } : {}),
-          };
-        }
-        const apiKey = ctx.resolveProviderApiKey(PROVIDER_ID);
+        const apiKey = selectedApiKey ?? ctx.resolveProviderApiKey(PROVIDER_ID);
         if (!apiKey.apiKey) {
           return null;
         }
-        const catalog = await buildOpenAILiveProviderConfig({
-          apiKey: apiKey.apiKey,
-          baseUrl: resolveOpenAICatalogBaseUrl(ctx),
-          discoveryApiKey: apiKey.discoveryApiKey,
-        });
+        const catalog = scopeOpenAICatalogOutcome(
+          await buildOpenAILiveProviderConfig({
+            apiKey: apiKey.apiKey,
+            baseUrl: resolveOpenAICatalogBaseUrl(ctx),
+            discoveryApiKey: apiKey.discoveryApiKey,
+          }),
+          selectedApiKey?.profileId,
+        );
         return {
           providers: { [PROVIDER_ID]: catalog.provider },
           ...(catalog.outcome ? { outcomes: [catalog.outcome] } : {}),

@@ -118,18 +118,16 @@ export function resolveExtraParams(params: {
   modelId: string;
   agentId?: string;
 }): Record<string, unknown> | undefined {
-  const { defaultParams, modelParams, agentEntryParams, agentModelParams } =
-    resolveModelExtraParamSources({
-      config: params.cfg,
-      provider: params.provider,
-      modelId: params.modelId,
-      agentId: params.agentId,
-    });
-  const scopedParams = [defaultParams, modelParams, agentEntryParams, agentModelParams];
+  const { paramSources } = resolveModelExtraParamSources({
+    config: params.cfg,
+    provider: params.provider,
+    modelId: params.modelId,
+    agentId: params.agentId,
+  });
 
-  const merged = Object.assign({}, ...scopedParams);
+  const merged = Object.assign({}, ...paramSources);
   const resolvedParallelToolCalls = resolveAliasedParamValue(
-    scopedParams,
+    paramSources,
     "parallel_tool_calls",
     "parallelToolCalls",
   );
@@ -139,7 +137,7 @@ export function resolveExtraParams(params: {
   }
 
   const resolvedTextVerbosity = resolveAliasedParamValue(
-    scopedParams.slice(1),
+    paramSources.slice(1),
     "text_verbosity",
     "textVerbosity",
   );
@@ -149,7 +147,7 @@ export function resolveExtraParams(params: {
   }
 
   const resolvedResponseFormat = resolveAliasedParamValue(
-    scopedParams,
+    paramSources,
     "response_format",
     "responseFormat",
   );
@@ -159,11 +157,11 @@ export function resolveExtraParams(params: {
   }
   canonicalizeMaxTokensParam({
     merged,
-    sources: scopedParams,
+    sources: paramSources,
   });
 
   const resolvedCachedContent = resolveAliasedParamValue(
-    scopedParams,
+    paramSources,
     "cached_content",
     "cachedContent",
   );
@@ -172,7 +170,7 @@ export function resolveExtraParams(params: {
     delete merged.cached_content;
   }
   if (params.provider === "openrouter") {
-    canonicalizeOpenRouterResponseCacheParams(merged, scopedParams);
+    canonicalizeOpenRouterResponseCacheParams(merged, paramSources);
   }
 
   applyDefaultOpenAIGptRuntimeParams(params, merged);

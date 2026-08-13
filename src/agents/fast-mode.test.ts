@@ -200,9 +200,10 @@ describe("resolveFastModeState", () => {
   });
 
   it.each([
-    ["fastSeconds", { fastSeconds: 15 }],
-    ["fast_seconds", { fast_seconds: 15 }],
-  ])("uses model %s alias for auto cutoff", (_label, params) => {
+    ["fastSeconds", { fastSeconds: 15 }, 15],
+    ["fast_seconds", { fast_seconds: 15 }, 15],
+    ["fast_auto_on_seconds before fastSeconds", { fast_auto_on_seconds: 20, fastSeconds: 15 }, 20],
+  ])("uses model %s alias for auto cutoff", (_label, params, expected) => {
     const cfg = {
       agents: {
         defaults: {
@@ -221,7 +222,7 @@ describe("resolveFastModeState", () => {
 
     expect(state.mode).toBe("auto");
     expect(state.source).toBe("config");
-    expect(state.fastAutoOnSeconds).toBe(15);
+    expect(state.fastAutoOnSeconds).toBe(expected);
   });
 
   it("uses model config when the runtime passes a provider-qualified model ref", () => {

@@ -6,6 +6,7 @@ import {
 } from "@openclaw/normalization-core/string-coerce";
 import {
   isAgentRuntimeModelParam,
+  resolveEffectiveModelExtraParams,
   resolveModelExtraParamSources,
 } from "../../../agents/model-extra-params.js";
 import { resolveModelRuntimePolicy } from "../../../agents/model-runtime-policy.js";
@@ -197,11 +198,8 @@ function collectCodexModelParamHits(
 ): CodexModelParamHit[] {
   const hits: CodexModelParamHit[] = [];
   const seen = new Set<string>();
-  const agentEntries = new Map(
-    listMutableCodexRouteAgentEntries(cfg).map(({ agent, agentId, path }) => [
-      agentId,
-      { agent, path },
-    ]),
+  const agentPaths = new Map(
+    listMutableCodexRouteAgentEntries(cfg).map(({ agentId, path }) => [agentId, path]),
   );
   for (const route of collectCodexRuntimeRouteHits(cfg, env)) {
     const parsed = parseCodexRouteModelRef(route.canonicalModel);
@@ -214,11 +212,6 @@ function collectCodexModelParamHits(
       modelId: parsed.modelId,
       agentId: route.agentId,
     });
-    const agentEntry = route.agentId ? agentEntries.get(route.agentId) : undefined;
-    const agentModels = asMutableRecord(agentEntry?.agent.models);
-    const agentModelParams = asMutableRecord(
-      asMutableRecord(agentModels?.[route.canonicalModel])?.params,
-    );
     const modelParams = sources.modelParams;
     const fastModes = ownValues(modelParams ?? {}, FAST_MODE_PARAM_KEYS);
     const serviceTiers = ownValues(modelParams ?? {}, SERVICE_TIER_PARAM_KEYS);
@@ -228,55 +221,36 @@ function collectCodexModelParamHits(
       serviceTiers.length > 0 &&
       serviceTiers.every((configured) => normalizeString(configured) === "priority") &&
       modelUsesCodexForEveryAgent(cfg, route.canonicalModel);
-    const paramSources = [
-      {
-        params: sources.defaultParams,
-        path: "agents.defaults.params",
-        modelScoped: false,
-        agentModelParams: undefined,
-      },
-      {
-        params: modelParams,
-        path: `agents.defaults.models.${route.canonicalModel}.params`,
-        modelScoped: true,
-        agentModelParams: undefined,
-      },
-      ...(route.agentId
-        ? [
-            {
-              params: sources.agentParams,
-              path: agentEntry?.path ?? `agents.entries.${route.agentId}`,
-              modelScoped: false,
-              agentModelParams,
-            },
-          ]
-        : []),
+    const agentPath = route.agentId
+      ? (agentPaths.get(route.agentId) ?? `agents.entries.${route.agentId}`)
+      : undefined;
+    const sourcePaths = [
+      "agents.defaults.params",
+      `agents.defaults.models.${route.canonicalModel}.params`,
+      agentPath ? `${agentPath}.params` : undefined,
+      agentPath ? `${agentPath}.models.${route.canonicalModel}.params` : undefined,
     ];
-    for (const source of paramSources) {
-      for (const [key, paramValue] of Object.entries(source.params ?? {})) {
-        if (isAgentRuntimeModelParam(key, paramValue)) {
-          continue;
-        }
-        const sourcePath = Object.hasOwn(source.agentModelParams ?? {}, key)
-          ? `${source.path}.models.${route.canonicalModel}.params`
-          : source.modelScoped || source.path === "agents.defaults.params"
-            ? source.path
-            : `${source.path}.params`;
-        const path = `${sourcePath}.${key}`;
-        if (seen.has(path)) {
-          continue;
-        }
-        seen.add(path);
-        hits.push({
-          key,
-          path,
-          modelRef: route.canonicalModel,
-          removable:
-            source.modelScoped &&
-            canRemoveServiceTier &&
-            SERVICE_TIER_PARAM_KEYS.some((alias) => alias === key),
-        });
+    for (const { key, effectiveKey, value, sourceIndex } of resolveEffectiveModelExtraParams(
+      sources,
+    )) {
+      const sourcePath = sourcePaths[sourceIndex];
+      if (!sourcePath || isAgentRuntimeModelParam(effectiveKey, value)) {
+        continue;
       }
+      const path = `${sourcePath}.${key}`;
+      if (seen.has(path)) {
+        continue;
+      }
+      seen.add(path);
+      hits.push({
+        key,
+        path,
+        modelRef: route.canonicalModel,
+        removable:
+          sourceIndex === 1 &&
+          canRemoveServiceTier &&
+          SERVICE_TIER_PARAM_KEYS.some((alias) => alias === key),
+      });
     }
   }
   return hits;

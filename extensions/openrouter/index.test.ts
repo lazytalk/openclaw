@@ -515,6 +515,7 @@ describe("openrouter provider hooks", () => {
       provider: "openrouter",
       modelId: "openrouter/fusion",
       promptMode: "full",
+      agentId: "analyst",
       config: {
         agents: {
           defaults: {
@@ -525,36 +526,9 @@ describe("openrouter provider hooks", () => {
                     plugins: [
                       {
                         id: "fusion",
-                        analysis_models: ["deepseek/deepseek-v4-pro"],
+                        analysis_models: ["default/model"],
                       },
                     ],
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    } as never);
-
-    expect(contribution?.dynamicSuffix).toContain("Analysis models: deepseek/deepseek-v4-pro.");
-  });
-
-  it("describes Fusion config from the selected agent model", async () => {
-    const provider = await registerSingleProviderPlugin(openrouterPlugin);
-    const contribution = provider.resolveSystemPromptContribution?.({
-      provider: "openrouter",
-      modelId: "openrouter/fusion",
-      promptMode: "full",
-      agentId: "analyst",
-      config: {
-        agents: {
-          defaults: {
-            models: {
-              "openrouter/fusion": {
-                params: {
-                  extraBody: {
-                    plugins: [{ id: "fusion", analysis_models: ["default/model"] }],
                   },
                 },
               },
@@ -1050,16 +1024,26 @@ describe("openrouter provider hooks", () => {
                   sort: "price",
                   data_collection: "deny",
                 },
+                frequencyPenalty: 0.3,
+              },
+            },
+            " OpenRouter ": {
+              params: {
+                provider: {
+                  sort: "throughput",
+                  allow_fallbacks: false,
+                },
+                frequencyPenalty: 0.1,
+                topK: 40,
               },
             },
           },
         },
       },
-      provider: "openrouter",
+      provider: " openrouter ",
       modelId: "openai/gpt-5.4",
       extraParams: {
         provider: {
-          sort: "latency",
           require_parameters: true,
         },
         temperature: 0.2,
@@ -1081,155 +1065,14 @@ describe("openrouter provider hooks", () => {
 
     expect(patch?.responseCache).toBe(true);
     expect(patch?.temperature).toBe(0.2);
+    expect(patch?.frequencyPenalty).toBe(0.3);
+    expect(patch?.topK).toBe(40);
     expect(patch?.provider).toEqual({
-      sort: "latency",
+      sort: "price",
       data_collection: "deny",
+      allow_fallbacks: false,
       order: ["openai"],
       require_parameters: true,
-    });
-  });
-
-  it.each([
-    { configuredProvider: "openrouter", runtimeProvider: "openrouter" },
-    { configuredProvider: "OpenRouter", runtimeProvider: "openrouter" },
-    { configuredProvider: " openrouter ", runtimeProvider: "openrouter" },
-    { configuredProvider: "openrouter", runtimeProvider: "OpenRouter" },
-    { configuredProvider: "openrouter", runtimeProvider: " openrouter " },
-  ])(
-    "preserves configured OpenRouter routing for $configuredProvider and $runtimeProvider",
-    async ({ configuredProvider, runtimeProvider }) => {
-      const provider = await registerSingleProviderPlugin(openrouterPlugin);
-      const patch = provider.extraParamsForTransport?.({
-        config: {
-          models: {
-            providers: {
-              [configuredProvider]: {
-                params: {
-                  provider: {
-                    order: ["anthropic"],
-                    allow_fallbacks: false,
-                  },
-                  temperature: 0.25,
-                },
-              },
-            },
-          },
-        },
-        provider: runtimeProvider,
-        modelId: "openai/gpt-5.4",
-        extraParams: { topP: 0.7 },
-        transport: "sse",
-      } as never)?.patch;
-
-      expect(patch).toEqual({
-        provider: {
-          order: ["anthropic"],
-          allow_fallbacks: false,
-        },
-        temperature: 0.25,
-        topP: 0.7,
-      });
-    },
-  );
-
-  it("prefers the exact OpenRouter provider key regardless of config key order", async () => {
-    const provider = await registerSingleProviderPlugin(openrouterPlugin);
-    const patch = provider.extraParamsForTransport?.({
-      config: {
-        models: {
-          providers: {
-            openrouter: {
-              params: { provider: { order: ["openai"], allow_fallbacks: false } },
-            },
-            OpenRouter: {
-              params: { provider: { order: ["anthropic"], allow_fallbacks: false } },
-            },
-          },
-        },
-      },
-      provider: "openrouter",
-      modelId: "openai/gpt-5.4",
-      extraParams: {},
-      transport: "sse",
-    } as never)?.patch;
-
-    expect(patch?.provider).toEqual({ order: ["openai"], allow_fallbacks: false });
-  });
-
-  it("preserves the later routing config for trimmed duplicate OpenRouter keys", async () => {
-    const provider = await registerSingleProviderPlugin(openrouterPlugin);
-    const patch = provider.extraParamsForTransport?.({
-      config: {
-        models: {
-          providers: {
-            " openrouter ": {
-              params: { provider: { order: ["anthropic"], allow_fallbacks: false } },
-            },
-            openrouter: {
-              params: {
-                provider: { order: ["openai"], allow_fallbacks: false },
-                temperature: 0.25,
-              },
-            },
-          },
-        },
-      },
-      provider: "openrouter",
-      modelId: "openai/gpt-5.4",
-      extraParams: {},
-      transport: "sse",
-    } as never)?.patch;
-
-    expect(patch).toEqual({
-      provider: { order: ["openai"], allow_fallbacks: false },
-      temperature: 0.25,
-    });
-  });
-
-  it("merges routing split across case- and whitespace-equivalent OpenRouter keys", async () => {
-    const provider = await registerSingleProviderPlugin(openrouterPlugin);
-    const patch = provider.extraParamsForTransport?.({
-      config: {
-        models: {
-          providers: {
-            " OpenRouter ": {
-              params: {
-                provider: {
-                  order: ["anthropic"],
-                  allow_fallbacks: false,
-                },
-                responseCache: true,
-                temperature: 0.1,
-              },
-            },
-            openrouter: {
-              params: {
-                provider: {
-                  sort: "price",
-                  require_parameters: true,
-                },
-                temperature: 0.25,
-              },
-            },
-          },
-        },
-      },
-      provider: "openrouter",
-      modelId: "openai/gpt-5.4",
-      extraParams: { topP: 0.7 },
-      transport: "sse",
-    } as never)?.patch;
-
-    expect(patch).toEqual({
-      provider: {
-        order: ["anthropic"],
-        allow_fallbacks: false,
-        sort: "price",
-        require_parameters: true,
-      },
-      responseCache: true,
-      temperature: 0.25,
-      topP: 0.7,
     });
   });
 

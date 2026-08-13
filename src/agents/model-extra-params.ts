@@ -4,20 +4,22 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { modelKey } from "../shared/model-key.js";
 import { resolveAgentConfig } from "./agent-scope-config.js";
 
-type ModelExtraParamSources = {
+export type ModelExtraParamSources = {
   defaultParams?: Record<string, unknown>;
   modelParams?: Record<string, unknown>;
-  agentParams?: Record<string, unknown>;
   agentEntryParams?: Record<string, unknown>;
   agentModelParams?: Record<string, unknown>;
+  paramSources: Array<Record<string, unknown> | undefined>;
 };
 
-const FAST_MODE_CUTOFF_MODEL_PARAM_KEYS = new Set([
+export const FAST_MODE_MODEL_PARAM_KEYS = ["fastMode", "fast_mode"] as const;
+export const FAST_MODE_CUTOFF_MODEL_PARAM_KEYS = [
   "fastAutoOnSeconds",
-  "fastSeconds",
   "fast_auto_on_seconds",
+  "fastSeconds",
   "fast_seconds",
-]);
+] as const;
+const FAST_MODE_CUTOFF_MODEL_PARAM_KEY_SET = new Set<string>(FAST_MODE_CUTOFF_MODEL_PARAM_KEYS);
 
 // Native harnesses receive recognized values as typed run controls. Other value
 // shapes with the same keys remain authored provider request parameters.
@@ -30,11 +32,11 @@ export function isAgentRuntimeModelParam(key: string, value: unknown): boolean {
       (typeof value === "string" && normalizeThinkLevel(value) !== undefined)
     );
   }
-  if (key === "fastMode" || key === "fast_mode") {
+  if (FAST_MODE_MODEL_PARAM_KEYS.some((candidate) => candidate === key)) {
     return normalizeFastMode(value) !== undefined;
   }
   return (
-    FAST_MODE_CUTOFF_MODEL_PARAM_KEYS.has(key) &&
+    FAST_MODE_CUTOFF_MODEL_PARAM_KEY_SET.has(key) &&
     typeof value === "number" &&
     Number.isInteger(value) &&
     value > 0
@@ -69,31 +71,70 @@ export function resolveModelExtraParamSources(params: {
     ? (agentConfig?.models?.[canonicalKey]?.params ??
       (legacyKey ? agentConfig?.models?.[legacyKey]?.params : undefined))
     : undefined;
-  // Keep the merged exact-key projection for classifiers and diagnostics.
-  // Request construction uses the separate records so alias precedence survives.
-  const agentParams = agentModelParams
-    ? { ...agentEntryParams, ...agentModelParams }
-    : agentEntryParams;
-  return { defaultParams, modelParams, agentParams, agentEntryParams, agentModelParams };
+  const paramSources = [defaultParams, modelParams, agentEntryParams, agentModelParams];
+  return { defaultParams, modelParams, agentEntryParams, agentModelParams, paramSources };
+}
+
+function resolveModelExtraParamEntryFromSources(
+  sources: readonly (Record<string, unknown> | undefined)[],
+  keys: readonly string[],
+  accepts?: (value: unknown) => boolean,
+): { key: string; value: unknown; sourceIndex: number } | undefined {
+  for (let sourceIndex = sources.length - 1; sourceIndex >= 0; sourceIndex -= 1) {
+    const source = sources[sourceIndex];
+    for (const key of keys) {
+      if (!source || !Object.hasOwn(source, key)) {
+        continue;
+      }
+      const value = source[key];
+      if (!accepts || accepts(value)) {
+        return { key, value, sourceIndex };
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Resolves the effective parameter set with the winning config scope retained. */
+export function resolveEffectiveModelExtraParams(sources: ModelExtraParamSources): Array<{
+  key: string;
+  effectiveKey: string;
+  value: unknown;
+  sourceIndex: number;
+}> {
+  const effective = new Map<
+    string,
+    { key: string; effectiveKey: string; value: unknown; sourceIndex: number }
+  >();
+  sources.paramSources.forEach((source, sourceIndex) => {
+    for (const [key, value] of Object.entries(source ?? {})) {
+      effective.set(key, { key, effectiveKey: key, value, sourceIndex });
+    }
+  });
+  for (const aliases of [FAST_MODE_MODEL_PARAM_KEYS, FAST_MODE_CUTOFF_MODEL_PARAM_KEYS]) {
+    const entry = resolveModelExtraParamEntryFromSources(sources.paramSources, aliases);
+    for (const alias of aliases) {
+      effective.delete(alias);
+    }
+    if (entry) {
+      effective.set(aliases[0], { ...entry, effectiveKey: aliases[0] });
+    }
+  }
+  return [...effective.values()];
 }
 
 /** Resolves one authored parameter across the canonical config precedence. */
 export function resolveModelExtraParamValue(
   params: Parameters<typeof resolveModelExtraParamSources>[0],
-  key: string,
+  key: string | readonly string[],
+  accepts?: (value: unknown) => boolean,
 ): unknown {
   const sources = resolveModelExtraParamSources(params);
-  for (const source of [
-    sources.agentModelParams,
-    sources.agentEntryParams,
-    sources.modelParams,
-    sources.defaultParams,
-  ]) {
-    if (source && Object.hasOwn(source, key)) {
-      return source[key];
-    }
-  }
-  return undefined;
+  return resolveModelExtraParamEntryFromSources(
+    sources.paramSources,
+    typeof key === "string" ? [key] : key,
+    accepts,
+  )?.value;
 }
 
 /** Returns whether embedded OpenClaw would apply authored provider request parameters. */
@@ -101,7 +142,7 @@ export function hasAuthoredProviderRequestParams(
   params: Parameters<typeof resolveModelExtraParamSources>[0],
 ): boolean {
   const sources = resolveModelExtraParamSources(params);
-  return Object.entries(
-    Object.assign({}, sources.defaultParams, sources.modelParams, sources.agentParams),
-  ).some(([key, value]) => !isAgentRuntimeModelParam(key, value));
+  return resolveEffectiveModelExtraParams(sources).some(
+    ({ effectiveKey, value }) => !isAgentRuntimeModelParam(effectiveKey, value),
+  );
 }
