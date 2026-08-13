@@ -372,6 +372,32 @@ describe("resolveExtraParams", () => {
     });
   });
 
+  it("preserves agent-model precedence across max-token alias styles", () => {
+    const result = resolveExtraParams({
+      cfg: {
+        agents: {
+          entries: {
+            audit: {
+              params: { maxTokens: 100 },
+              models: {
+                "openai/gpt-5.6-sol": { params: { max_tokens: 200 } },
+              },
+            },
+          },
+        },
+      },
+      provider: "openai",
+      modelId: "gpt-5.6-sol",
+      agentId: "audit",
+    });
+
+    expect(result).toEqual({
+      maxTokens: 200,
+      parallel_tool_calls: true,
+      text_verbosity: "low",
+    });
+  });
+
   it("ignores per-agent params when agentId does not match", () => {
     const result = resolveExtraParams({
       cfg: {

@@ -69,8 +69,8 @@ export function resolveModelExtraParamSources(params: {
     ? (agentConfig?.models?.[canonicalKey]?.params ??
       (legacyKey ? agentConfig?.models?.[legacyKey]?.params : undefined))
     : undefined;
-  // Model-specific agent settings are narrower than agent-wide settings and
-  // must stay in the same precedence source for transport alias normalization.
+  // Keep the merged exact-key projection for classifiers and diagnostics.
+  // Request construction uses the separate records so alias precedence survives.
   const agentParams = agentModelParams
     ? { ...agentEntryParams, ...agentModelParams }
     : agentEntryParams;
