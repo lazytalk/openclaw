@@ -76,12 +76,16 @@ function resolveOpenRouterProviderConfigParams(
 
   const providers = Object.entries(ctx.config?.models?.providers ?? {});
   // Preserve routing split across normalized duplicates; merge nested params
-  // field-wise while allowing later scalar settings to override earlier ones.
+  // field-wise, then apply exact-key rows so aliases cannot override them.
+  const matchedProviders = providers.filter(
+    ([provider]) => normalizeProviderId(provider) === normalizedProvider,
+  );
+  const prioritizedProviders = [
+    ...matchedProviders.filter(([provider]) => provider.trim() !== requestedProvider),
+    ...matchedProviders.filter(([provider]) => provider.trim() === requestedProvider),
+  ];
   let matchedParams: Record<string, unknown> | undefined;
-  for (const [provider, config] of providers) {
-    if (normalizeProviderId(provider) !== normalizedProvider) {
-      continue;
-    }
+  for (const [, config] of prioritizedProviders) {
     const params = readRecord(config.params);
     if (params) {
       matchedParams = mergeOpenRouterProviderConfigParams(matchedParams, params);

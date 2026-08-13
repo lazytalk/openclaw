@@ -119,6 +119,43 @@ describe("resolveFastModeState", () => {
     expect(state.source).toBe("config");
   });
 
+  it("uses per-agent model fast params at the narrowest config precedence", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          params: { fast_mode: false, fast_seconds: 90 },
+          models: {
+            "openai/gpt-5.5": { params: { fastMode: true, fastAutoOnSeconds: 60 } },
+          },
+        },
+        entries: {
+          audit: {
+            params: { fastMode: false, fastAutoOnSeconds: 30 },
+            models: {
+              "openai/gpt-5.5": {
+                params: { fast_mode: "auto", fast_seconds: 15 },
+              },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const state = resolveFastModeState({
+      cfg,
+      provider: "openai",
+      model: "gpt-5.5",
+      agentId: "audit",
+    });
+
+    expect(state).toMatchObject({
+      mode: "auto",
+      enabled: true,
+      source: "config",
+      fastAutoOnSeconds: 15,
+    });
+  });
+
   it("formats auto mode with the default threshold", () => {
     expect(formatFastModeAutoLabel()).toBe("auto (60 sec)");
     expect(formatFastModeStatusValue({ mode: "auto" })).toBe("auto (60 sec)");

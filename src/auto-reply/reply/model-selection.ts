@@ -8,11 +8,11 @@ import { clearSessionAuthProfileOverride } from "../../agents/auth-profiles/sess
 import { resolveAgentHarnessPolicy } from "../../agents/harness/policy.js";
 import type { ModelCatalogEntry } from "../../agents/model-catalog.js";
 import type { ModelCatalogSnapshot } from "../../agents/model-catalog.types.js";
+import { resolveModelExtraParamValue } from "../../agents/model-extra-params.js";
 import type { ModelFallbackRouteResolution } from "../../agents/model-fallback.types.js";
 import {
   type ModelAliasIndex,
   buildConfiguredModelCatalog,
-  legacyModelKey,
   modelKey,
   normalizeProviderId,
   resolveModelAliasFromPair,
@@ -629,14 +629,16 @@ export async function createModelSelectionState(params: {
       defaultThinkingLevels.set(cacheKey, agentThinkingDefault);
       return agentThinkingDefault;
     }
-    const configuredModels = cfg.agents?.defaults?.models;
-    const canonicalKey = modelKey(selectedProvider, selectedModel);
-    const legacyKey = legacyModelKey(selectedProvider, selectedModel);
-    const configuredModelThinkingDefault =
-      configuredModels?.[canonicalKey]?.params?.thinking ??
-      (legacyKey ? configuredModels?.[legacyKey]?.params?.thinking : undefined);
     const resolvedConfiguredModelThinkingDefault = resolveConfiguredModelThinkingDefault(
-      configuredModelThinkingDefault,
+      resolveModelExtraParamValue(
+        {
+          config: cfg,
+          provider: selectedProvider,
+          modelId: selectedModel,
+          agentId: params.agentId,
+        },
+        "thinking",
+      ),
     );
     if (resolvedConfiguredModelThinkingDefault) {
       defaultThinkingLevels.set(cacheKey, resolvedConfiguredModelThinkingDefault);
@@ -707,12 +709,10 @@ export async function createModelSelectionState(params: {
     provider,
     model,
   });
-  const configuredModels = cfg.agents?.defaults?.models;
-  const canonicalKey = modelKey(provider, model);
-  const legacyKey = legacyModelKey(provider, model);
-  const configuredModelThinkingDefault =
-    configuredModels?.[canonicalKey]?.params?.thinking ??
-    (legacyKey ? configuredModels?.[legacyKey]?.params?.thinking : undefined);
+  const configuredModelThinkingDefault = resolveModelExtraParamValue(
+    { config: cfg, provider, modelId: model, agentId: params.agentId },
+    "thinking",
+  );
   const hasConfiguredThinkingDefault =
     agentEntry?.thinkingDefault !== undefined ||
     resolveConfiguredModelThinkingDefault(configuredModelThinkingDefault) !== undefined ||

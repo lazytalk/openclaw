@@ -8,6 +8,8 @@ type ModelExtraParamSources = {
   defaultParams?: Record<string, unknown>;
   modelParams?: Record<string, unknown>;
   agentParams?: Record<string, unknown>;
+  agentEntryParams?: Record<string, unknown>;
+  agentModelParams?: Record<string, unknown>;
 };
 
 const FAST_MODE_CUTOFF_MODEL_PARAM_KEYS = new Set([
@@ -62,6 +64,7 @@ export function resolveModelExtraParamSources(params: {
     : undefined;
   const agentConfig =
     params.agentId && params.config ? resolveAgentConfig(params.config, params.agentId) : undefined;
+  const agentEntryParams = agentConfig?.params;
   const agentModelParams = canonicalKey
     ? (agentConfig?.models?.[canonicalKey]?.params ??
       (legacyKey ? agentConfig?.models?.[legacyKey]?.params : undefined))
@@ -69,9 +72,28 @@ export function resolveModelExtraParamSources(params: {
   // Model-specific agent settings are narrower than agent-wide settings and
   // must stay in the same precedence source for transport alias normalization.
   const agentParams = agentModelParams
-    ? { ...agentConfig?.params, ...agentModelParams }
-    : agentConfig?.params;
-  return { defaultParams, modelParams, agentParams };
+    ? { ...agentEntryParams, ...agentModelParams }
+    : agentEntryParams;
+  return { defaultParams, modelParams, agentParams, agentEntryParams, agentModelParams };
+}
+
+/** Resolves one authored parameter across the canonical config precedence. */
+export function resolveModelExtraParamValue(
+  params: Parameters<typeof resolveModelExtraParamSources>[0],
+  key: string,
+): unknown {
+  const sources = resolveModelExtraParamSources(params);
+  for (const source of [
+    sources.agentModelParams,
+    sources.agentEntryParams,
+    sources.modelParams,
+    sources.defaultParams,
+  ]) {
+    if (source && Object.hasOwn(source, key)) {
+      return source[key];
+    }
+  }
+  return undefined;
 }
 
 /** Returns whether embedded OpenClaw would apply authored provider request parameters. */

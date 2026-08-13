@@ -1091,17 +1091,17 @@ describe("openrouter provider hooks", () => {
     },
   );
 
-  it("prefers the exact OpenRouter provider key over a differently cased key", async () => {
+  it("prefers the exact OpenRouter provider key regardless of config key order", async () => {
     const provider = await registerSingleProviderPlugin(openrouterPlugin);
     const patch = provider.extraParamsForTransport?.({
       config: {
         models: {
           providers: {
-            OpenRouter: {
-              params: { provider: { order: ["anthropic"], allow_fallbacks: false } },
-            },
             openrouter: {
               params: { provider: { order: ["openai"], allow_fallbacks: false } },
+            },
+            OpenRouter: {
+              params: { provider: { order: ["anthropic"], allow_fallbacks: false } },
             },
           },
         },

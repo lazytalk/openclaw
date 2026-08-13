@@ -621,6 +621,42 @@ describe("createModelSelectionState catalog loading", () => {
     await expect(state.resolveDefaultThinkingLevel()).resolves.toBe("minimal");
   });
 
+  it("uses per-agent model thinking at the narrowest config precedence", async () => {
+    vi.mocked(loadModelCatalogLocal).mockClear();
+    const cfg = {
+      agents: {
+        defaults: {
+          params: { thinking: "low" },
+          models: {
+            "openai/gpt-5.4": { params: { thinking: "medium" } },
+          },
+        },
+        entries: {
+          audit: {
+            params: { thinking: "high" },
+            models: {
+              "openai/gpt-5.4": { params: { thinking: "xhigh" } },
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const state = await createModelSelectionState({
+      cfg,
+      agentId: "audit",
+      agentCfg: cfg.agents?.defaults,
+      defaultProvider: "openai",
+      defaultModel: "gpt-5.4",
+      provider: "openai",
+      model: "gpt-5.4",
+      hasModelDirective: false,
+    });
+
+    await expect(state.resolveDefaultThinkingLevel()).resolves.toBe("xhigh");
+    expect(loadModelCatalogLocal).not.toHaveBeenCalled();
+  });
+
   it("loads the full catalog for explicit model directives", async () => {
     vi.mocked(loadModelCatalogLocal).mockClear();
     const cfg = {
