@@ -101,7 +101,7 @@ export function hasAuthoredProviderRequestParams(
   params: Parameters<typeof resolveModelExtraParamSources>[0],
 ): boolean {
   const sources = resolveModelExtraParamSources(params);
-  return [sources.defaultParams, sources.modelParams, sources.agentParams].some((source) =>
-    Object.entries(source ?? {}).some(([key, value]) => !isAgentRuntimeModelParam(key, value)),
-  );
+  return Object.entries(
+    Object.assign({}, sources.defaultParams, sources.modelParams, sources.agentParams),
+  ).some(([key, value]) => !isAgentRuntimeModelParam(key, value));
 }

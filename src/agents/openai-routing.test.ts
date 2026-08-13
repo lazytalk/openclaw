@@ -148,6 +148,37 @@ describe("OpenAI runtime routing policy", () => {
     ).toBe(false);
   });
 
+  it("classifies only the effective value after agent-model parameter precedence", () => {
+    const modelKey = "openai/gpt-5.6-sol";
+    const config = {
+      agents: {
+        defaults: {
+          params: { thinking: { type: "enabled", budget_tokens: 2_048 } },
+        },
+        entries: {
+          audit: {
+            models: {
+              [modelKey]: { params: { thinking: "high" } },
+            },
+          },
+        },
+      },
+    } satisfies OpenClawConfig;
+
+    expect(
+      resolveOpenAIImplicitAgentRuntime({
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+        config,
+        agentId: "audit",
+        env: {},
+      }),
+    ).toBe("codex");
+    expect(
+      modelSelectionShouldEnsureCodexPlugin({ model: modelKey, config, agentId: "audit" }),
+    ).toBe(true);
+  });
+
   it("maps provider route facts onto a closed implicit runtime", () => {
     expect(
       resolveOpenAIImplicitAgentRuntime({ provider: "openai", modelId: "gpt-5.6", env: {} }),
