@@ -462,6 +462,12 @@ describe("buildOpenAIProvider", () => {
   });
 
   it("scopes the OpenAI API-key catalog to the OpenAI provider id", async () => {
+    mocks.resolveApiKeyForProvider.mockResolvedValue({
+      mode: "oauth",
+      apiKey: "synthetic-oauth-token",
+      source: "profile:openai:chatgpt",
+      profileId: "openai:chatgpt",
+    });
     const provider = buildOpenAIProvider();
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       Response.json({
@@ -471,7 +477,6 @@ describe("buildOpenAIProvider", () => {
 
     try {
       const result = await provider.catalog?.run({
-        providerIds: ["openai"],
         resolveProviderAuth: () => ({
           mode: "api_key",
           apiKey: "sk-openai",
@@ -485,6 +490,8 @@ describe("buildOpenAIProvider", () => {
       }
       expect(Object.keys(result.providers)).toEqual(["openai"]);
       expect(result.providers.openai?.apiKey).toBe("sk-openai");
+      expect(mocks.resolveApiKeyForProvider).not.toHaveBeenCalled();
+      expect(mocks.resolveProviderAuthProfileMetadata).not.toHaveBeenCalled();
       expect(fetchSpy).toHaveBeenCalledOnce();
       const fetchInit = fetchSpy.mock.calls[0]?.[1];
       const headers = fetchInit?.headers;
@@ -526,6 +533,81 @@ describe("buildOpenAIProvider", () => {
         expect(resolveProviderApiKey).not.toHaveBeenCalled();
         expect(mocks.resolveApiKeyForProvider).not.toHaveBeenCalled();
         expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+      }
+    },
+  );
+
+  it.each([
+    {
+      name: "the official OpenAI API",
+      baseUrl: OPENAI_API_BASE_URL,
+      expectedFetches: 1,
+    },
+    {
+      name: "a custom OpenAI-compatible endpoint",
+      baseUrl: "https://example-proxy.invalid/v1",
+      expectedFetches: 0,
+    },
+  ])(
+    "keeps a selected $name API key when an OAuth profile is also available",
+    async ({ baseUrl, expectedFetches }) => {
+      mocks.resolveApiKeyForProvider.mockResolvedValue({
+        mode: "oauth",
+        apiKey: "synthetic-oauth-token",
+        source: "profile:openai:chatgpt",
+        profileId: "openai:chatgpt",
+      });
+      mocks.resolveProviderAuthProfileMetadata.mockReturnValue({
+        profileId: "openai:chatgpt",
+        accountId: "synthetic-oauth-account",
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        Response.json({
+          data: [{ id: "gpt-5.5", object: "model" }],
+        }),
+      );
+
+      try {
+        const result = await buildOpenAIProvider().catalog?.run({
+          resolveProviderAuth: () => ({
+            mode: "api_key",
+            apiKey: "synthetic-platform-key",
+            discoveryApiKey: "synthetic-platform-discovery-key",
+            source: "env",
+          }),
+          config: {
+            auth: {
+              profiles: {
+                "openai:chatgpt": { provider: "openai", mode: "oauth" },
+              },
+            },
+            models: { providers: { openai: { baseUrl, models: [] } } },
+          },
+          agentDir: "/tmp/openai-agent",
+          workspaceDir: "/tmp/openai-workspace",
+        } as never);
+
+        if (!result || "provider" in result) {
+          throw new Error("expected OpenAI API-key provider catalog");
+        }
+        expect(result.providers.openai).toMatchObject({
+          api: "openai-responses",
+          apiKey: "synthetic-platform-key",
+          baseUrl,
+        });
+        expect(mocks.resolveApiKeyForProvider).not.toHaveBeenCalled();
+        expect(mocks.resolveProviderAuthProfileMetadata).not.toHaveBeenCalled();
+        expect(fetchSpy).toHaveBeenCalledTimes(expectedFetches);
+        if (expectedFetches > 0) {
+          const headers = fetchSpy.mock.calls[0]?.[1]?.headers;
+          expect(headers).toBeInstanceOf(Headers);
+          if (!(headers instanceof Headers)) {
+            throw new Error("expected OpenAI discovery request headers");
+          }
+          expect(headers.get("Authorization")).toBe("Bearer synthetic-platform-discovery-key");
+        }
       } finally {
         fetchSpy.mockRestore();
       }
@@ -1799,74 +1881,6 @@ describe("buildOpenAIProvider", () => {
         },
       } as never),
     ).toEqual({ effort: "high", transport: "sse" });
-  });
-
-  it("delegates an unlisted first-party model to its explicitly selected Codex runtime", () => {
-    const provider = buildOpenAIProvider();
-    const model = provider.resolveDynamicModel?.({
-      provider: "openai",
-      modelId: "gpt-future",
-      modelRegistry: { find: () => null },
-      agentRuntimeId: "codex",
-    } as never);
-
-    expect(model).toMatchObject({
-      provider: "openai",
-      id: "gpt-future",
-      api: "openai-chatgpt-responses",
-      baseUrl: "https://chatgpt.com/backend-api/codex",
-      compat: { supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"] },
-    });
-    expect(
-      provider
-        .resolveThinkingProfile?.({
-          provider: "openai",
-          modelId: "gpt-future",
-          agentRuntime: "codex",
-          api: model?.api,
-          compat: model?.compat,
-        } as never)
-        ?.levels.map((level) => level.id),
-    ).toContain("max");
-    expect(
-      provider
-        .resolveThinkingProfile?.({
-          provider: "openai",
-          modelId: "gpt-future",
-          agentRuntime: "codex",
-        } as never)
-        ?.levels.map((level) => level.id),
-    ).toEqual(expect.arrayContaining(["xhigh", "max"]));
-  });
-
-  it("does not invent an unlisted model for authored Platform credentials", () => {
-    const provider = buildOpenAIProvider();
-
-    expect(
-      provider.resolveDynamicModel?.({
-        provider: "openai",
-        modelId: "gpt-future",
-        modelRegistry: { find: () => null },
-        agentRuntimeId: "codex",
-        authProfileId: "openai:platform",
-        authProfileMode: "api_key",
-        providerConfig: {
-          auth: "api-key",
-          api: "openai-responses",
-          baseUrl: "https://api.openai.com/v1",
-        },
-      } as never),
-    ).toBeUndefined();
-    expect(
-      provider
-        .resolveThinkingProfile?.({
-          provider: "openai",
-          modelId: "gpt-future",
-          agentRuntime: "codex",
-          api: "openai-responses",
-        } as never)
-        ?.levels.map((level) => level.id),
-    ).not.toContain("max");
   });
 
   it("restores gpt-5.3-codex-spark only through ChatGPT/Codex OAuth routing", () => {

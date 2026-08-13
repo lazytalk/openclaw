@@ -197,8 +197,11 @@ function collectCodexModelParamHits(
 ): CodexModelParamHit[] {
   const hits: CodexModelParamHit[] = [];
   const seen = new Set<string>();
-  const agentPaths = new Map(
-    listMutableCodexRouteAgentEntries(cfg).map(({ agentId, path }) => [agentId, path]),
+  const agentEntries = new Map(
+    listMutableCodexRouteAgentEntries(cfg).map(({ agent, agentId, path }) => [
+      agentId,
+      { agent, path },
+    ]),
   );
   for (const route of collectCodexRuntimeRouteHits(cfg, env)) {
     const parsed = parseCodexRouteModelRef(route.canonicalModel);
@@ -211,6 +214,11 @@ function collectCodexModelParamHits(
       modelId: parsed.modelId,
       agentId: route.agentId,
     });
+    const agentEntry = route.agentId ? agentEntries.get(route.agentId) : undefined;
+    const agentModels = asMutableRecord(agentEntry?.agent.models);
+    const agentModelParams = asMutableRecord(
+      asMutableRecord(agentModels?.[route.canonicalModel])?.params,
+    );
     const modelParams = sources.modelParams;
     const fastModes = ownValues(modelParams ?? {}, FAST_MODE_PARAM_KEYS);
     const serviceTiers = ownValues(modelParams ?? {}, SERVICE_TIER_PARAM_KEYS);
@@ -221,28 +229,40 @@ function collectCodexModelParamHits(
       serviceTiers.every((configured) => normalizeString(configured) === "priority") &&
       modelUsesCodexForEveryAgent(cfg, route.canonicalModel);
     const paramSources = [
-      { params: sources.defaultParams, path: "agents.defaults.params", modelScoped: false },
+      {
+        params: sources.defaultParams,
+        path: "agents.defaults.params",
+        modelScoped: false,
+        agentModelParams: undefined,
+      },
       {
         params: modelParams,
         path: `agents.defaults.models.${route.canonicalModel}.params`,
         modelScoped: true,
+        agentModelParams: undefined,
       },
       ...(route.agentId
         ? [
             {
               params: sources.agentParams,
-              path: `${agentPaths.get(route.agentId) ?? `agents.entries.${route.agentId}`}.params`,
+              path: agentEntry?.path ?? `agents.entries.${route.agentId}`,
               modelScoped: false,
+              agentModelParams,
             },
           ]
         : []),
     ];
     for (const source of paramSources) {
       for (const [key, paramValue] of Object.entries(source.params ?? {})) {
-        if (source.modelScoped && isAgentRuntimeModelParam(key, paramValue)) {
+        if (isAgentRuntimeModelParam(key, paramValue)) {
           continue;
         }
-        const path = `${source.path}.${key}`;
+        const sourcePath = Object.hasOwn(source.agentModelParams ?? {}, key)
+          ? `${source.path}.models.${route.canonicalModel}.params`
+          : source.modelScoped || source.path === "agents.defaults.params"
+            ? source.path
+            : `${source.path}.params`;
+        const path = `${sourcePath}.${key}`;
         if (seen.has(path)) {
           continue;
         }

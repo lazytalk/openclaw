@@ -441,7 +441,7 @@ describe("collectCodexRouteWarnings", () => {
       agents: {
         defaults: {
           model: "openai/gpt-5.6-sol",
-          params: { temperature: 0.7 },
+          params: { temperature: 0.7, thinking: "high" },
           models: {
             "openai/gpt-5.6-sol": {
               params: {
@@ -459,7 +459,14 @@ describe("collectCodexRouteWarnings", () => {
           },
         },
         entries: {
-          coder: { params: { topP: 0.8 } },
+          coder: {
+            params: { topP: 0.8, fastMode: "auto", temperature: 0.6 },
+            models: {
+              "openai/gpt-5.6-sol": {
+                params: { temperature: 0.1, thinking: "medium", topK: 40 },
+              },
+            },
+          },
           worker: {
             models: {
               "openai/gpt-5.6-sol": { agentRuntime: { id: "openclaw" } },
@@ -481,6 +488,18 @@ describe("collectCodexRouteWarnings", () => {
     );
     expect(result.warnings.join("\n")).toContain("agents.defaults.params.temperature");
     expect(result.warnings.join("\n")).toContain("agents.entries.coder.params.topP");
+    expect(result.warnings.join("\n")).toContain(
+      "agents.entries.coder.models.openai/gpt-5.6-sol.params.temperature",
+    );
+    expect(result.warnings.join("\n")).toContain(
+      "agents.entries.coder.models.openai/gpt-5.6-sol.params.topK",
+    );
+    expect(result.warnings.join("\n")).not.toContain("agents.entries.coder.params.temperature");
+    expect(result.warnings.join("\n")).not.toContain("agents.defaults.params.thinking");
+    expect(result.warnings.join("\n")).not.toContain("agents.entries.coder.params.fastMode");
+    expect(result.warnings.join("\n")).not.toContain(
+      "agents.entries.coder.models.openai/gpt-5.6-sol.params.thinking",
+    );
     expect(result.warnings.join("\n")).not.toContain("gpt-5.6-openclaw.params.serviceTier");
   });
 

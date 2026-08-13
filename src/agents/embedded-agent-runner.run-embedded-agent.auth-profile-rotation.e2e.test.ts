@@ -205,14 +205,14 @@ const makeAgentOverrideOnlyFallbackConfig = (agentId: string): OpenClawConfig =>
           fallbacks: [],
         },
       },
-      list: [
-        {
-          id: agentId,
+      entries: {
+        main: { default: true },
+        [agentId]: {
           model: {
             fallbacks: ["openai/mock-2"],
           },
         },
-      ],
+      },
     },
     models: {
       providers: {
