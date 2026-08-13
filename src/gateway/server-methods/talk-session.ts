@@ -27,6 +27,7 @@ import {
 } from "../talk-realtime-relay.js";
 import {
   createGatewayRealtimeTalkSession,
+  getPluginTalkSessionDispatchContext,
   TalkRealtimeSessionRequestError,
 } from "../talk-realtime-session-create.js";
 import {
@@ -246,11 +247,18 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
           requestedOwner?.agentId ??
           bareTalkAgentId ??
           resolveTalkSessionAgentId(runtimeConfig, requestedSessionKey);
+        const pluginDispatch = getPluginTalkSessionDispatchContext(connId);
         try {
           const session = await createGatewayRealtimeTalkSession({
             context,
-            ownerId: connId,
+            ownerId: pluginDispatch?.ownerId ?? connId,
             agentId,
+            ...(pluginDispatch
+              ? {
+                  quotaOwnerId: pluginDispatch.quotaOwnerId,
+                  eventSink: pluginDispatch.eventSink,
+                }
+              : {}),
             request: params,
           });
           return respondOk(respond, session);

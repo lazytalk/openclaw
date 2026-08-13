@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import type { TalkSessionCreateResult } from "../../packages/gateway-protocol/src/index.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { getPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
+import { BoundedSerialQueue } from "../shared/bounded-serial-queue.js";
 import {
   PLUGIN_TALK_AUDIO_FORMAT,
   type OpenPluginTalkSessionParams,
@@ -8,15 +10,17 @@ import {
   type PluginTalkSessionEvent,
 } from "../talk/plugin-session.js";
 import { authorizeOperatorScopesForMethod } from "./method-scopes.js";
+import { dispatchGatewayMethodInProcess } from "./server-plugin-in-process-dispatch.js";
 import type { TalkRealtimeRelayEvent } from "./talk-realtime-relay-state.js";
 import {
   cancelTalkRealtimeRelayOutput,
   sendTalkRealtimeRelayAudio,
   stopTalkRealtimeRelaySession,
 } from "./talk-realtime-relay.js";
-import { createGatewayRealtimeTalkSession } from "./talk-realtime-session-create.js";
+import { withPluginTalkSessionDispatchContext } from "./talk-realtime-session-create.js";
 
 const PCM16_24KHZ_MONO_BYTES_PER_MS = 48;
+const MAX_PENDING_PLUGIN_TALK_EVENTS = 128;
 
 function talkSessionAbortError(signal: AbortSignal, fallback: string): Error {
   return signal.reason instanceof Error ? signal.reason : new Error(fallback);
@@ -41,6 +45,7 @@ function requirePluginTalkScope() {
     );
   }
   return {
+    clientConnId: scope.client.connId,
     context: scope.context,
     pluginId: scope.pluginId,
     quotaOwnerId: `plugin:${scope.pluginId}:${scope.client.connId}`,
@@ -57,13 +62,39 @@ function createPluginTalkEventSink(
   let state: Extract<PluginTalkSessionEvent, { type: "state" }>["state"] = "idle";
   let closed = false;
   let outputGeneration: number | undefined;
+  let deliveryFailed = false;
+  const deliveryQueue = new BoundedSerialQueue({
+    maxPendingCount: MAX_PENDING_PLUGIN_TALK_EVENTS,
+    maxPendingWeight: MAX_PENDING_PLUGIN_TALK_EVENTS,
+  });
 
-  const deliver = (event: PluginTalkSessionEvent): void => {
-    try {
-      void Promise.resolve(params.onEvent(event)).catch(onDeliveryError);
-    } catch (error) {
-      onDeliveryError(error);
+  const failDelivery = (error: unknown): void => {
+    if (deliveryFailed) {
+      return;
     }
+    deliveryFailed = true;
+    deliveryQueue.seal();
+    onDeliveryError(error);
+  };
+  const deliver = (event: PluginTalkSessionEvent): void => {
+    if (deliveryFailed) {
+      return;
+    }
+    const admission = deliveryQueue.enqueue(async () => {
+      if (deliveryFailed) {
+        return;
+      }
+      try {
+        await params.onEvent(event);
+      } catch (error) {
+        failDelivery(error);
+      }
+    });
+    if (!admission.accepted) {
+      failDelivery(new Error("Plugin Talk event delivery could not keep up with realtime audio"));
+      return;
+    }
+    void admission.completion.catch(failDelivery);
   };
   const setState = (next: typeof state): void => {
     if (state === next || closed) {
@@ -151,7 +182,7 @@ export async function openPluginTalkSession(
   if (params.signal.aborted) {
     throw talkSessionAbortError(params.signal, "Talk session was cancelled before it opened");
   }
-  const { context, pluginId, quotaOwnerId } = requirePluginTalkScope();
+  const { clientConnId, context, pluginId, quotaOwnerId } = requirePluginTalkScope();
   const ownerId = `plugin:${pluginId}:${randomUUID()}`;
   const lifecycle: { relaySessionId?: string; aborted: boolean; removeAbortListener?: () => void } =
     {
@@ -180,31 +211,46 @@ export async function openPluginTalkSession(
   };
   params.signal.addEventListener("abort", abort, { once: true });
   lifecycle.removeAbortListener = () => params.signal.removeEventListener("abort", abort);
-  let session: Awaited<ReturnType<typeof createGatewayRealtimeTalkSession>>;
+  let session: TalkSessionCreateResult;
   try {
-    session = await createGatewayRealtimeTalkSession({
-      context,
-      ownerId,
-      quotaOwnerId,
-      request: {
-        sessionKey,
-        ...(params.provider ? { provider: params.provider } : {}),
-        ...(params.model ? { model: params.model } : {}),
-        ...(params.voice ? { voice: params.voice } : {}),
-        ...(params.language ? { language: params.language } : {}),
+    session = await withPluginTalkSessionDispatchContext(
+      {
+        clientConnId,
+        ownerId,
+        quotaOwnerId,
+        eventSink: (event) => {
+          events.eventSink(event);
+          if (event.type === "close") {
+            lifecycle.removeAbortListener?.();
+          }
+        },
       },
-      eventSink: (event) => {
-        events.eventSink(event);
-        if (event.type === "close") {
-          lifecycle.removeAbortListener?.();
-        }
-      },
-    });
+      async () =>
+        await dispatchGatewayMethodInProcess<TalkSessionCreateResult>(
+          "talk.session.create",
+          {
+            sessionKey,
+            mode: "realtime",
+            transport: "gateway-relay",
+            brain: "agent-consult",
+            ...(params.provider ? { provider: params.provider } : {}),
+            ...(params.model ? { model: params.model } : {}),
+            ...(params.voice ? { voice: params.voice } : {}),
+            ...(params.language ? { language: params.language } : {}),
+          },
+          { requireScopedClient: true },
+        ),
+    );
   } catch (error) {
     lifecycle.removeAbortListener();
     throw error;
   }
-  lifecycle.relaySessionId = session.relaySessionId;
+  const relaySessionId = session.relaySessionId;
+  if (!relaySessionId) {
+    lifecycle.removeAbortListener();
+    throw new Error("Gateway did not return a realtime Talk relay session");
+  }
+  lifecycle.relaySessionId = relaySessionId;
   if (lifecycle.aborted || deliveryError) {
     stopRelay();
     lifecycle.removeAbortListener();
@@ -223,7 +269,7 @@ export async function openPluginTalkSession(
         throw new Error("Talk session is closed");
       }
       sendTalkRealtimeRelayAudio({
-        relaySessionId: session.relaySessionId,
+        relaySessionId,
         connId: ownerId,
         audioBase64: Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength).toString("base64"),
         timestamp: options?.timestamp,
@@ -238,7 +284,7 @@ export async function openPluginTalkSession(
         return;
       }
       cancelTalkRealtimeRelayOutput({
-        relaySessionId: session.relaySessionId,
+        relaySessionId,
         connId: ownerId,
         outputGeneration,
         reason: reason?.trim() || "plugin-cancelled",
@@ -249,7 +295,7 @@ export async function openPluginTalkSession(
         return;
       }
       lifecycle.removeAbortListener?.();
-      stopTalkRealtimeRelaySession({ relaySessionId: session.relaySessionId, connId: ownerId });
+      stopTalkRealtimeRelaySession({ relaySessionId, connId: ownerId });
     },
   };
 }

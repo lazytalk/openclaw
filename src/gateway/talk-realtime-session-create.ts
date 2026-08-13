@@ -1,6 +1,8 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import type { TalkSessionCreateParams } from "../../packages/gateway-protocol/src/index.js";
 import { buildAgentMainSessionKey } from "../routing/session-key.js";
+import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { REALTIME_VOICE_AGENT_CONSULT_TOOL } from "../talk/agent-consult-tool.js";
 import { REALTIME_VOICE_AGENT_CONTROL_TOOL } from "../talk/agent-run-control-shared.js";
 import { resolveTalkSessionAgentId } from "../talk/agent-target.js";
@@ -22,6 +24,40 @@ type RealtimeTalkSessionRequest = Pick<
   TalkSessionCreateParams,
   "language" | "model" | "provider" | "sessionKey" | "voice"
 >;
+
+type PluginTalkSessionDispatchContext = {
+  clientConnId: string;
+  ownerId: string;
+  quotaOwnerId: string;
+  eventSink: TalkRealtimeRelayEventSink;
+};
+
+const PLUGIN_TALK_SESSION_DISPATCH_CONTEXT_KEY: unique symbol = Symbol.for(
+  "openclaw.pluginTalkSessionDispatchContext",
+);
+const pluginTalkSessionDispatchContext = resolveGlobalSingleton<
+  AsyncLocalStorage<PluginTalkSessionDispatchContext>
+>(
+  PLUGIN_TALK_SESSION_DISPATCH_CONTEXT_KEY,
+  () => new AsyncLocalStorage<PluginTalkSessionDispatchContext>(),
+);
+
+export function withPluginTalkSessionDispatchContext<T>(
+  context: PluginTalkSessionDispatchContext,
+  run: () => T,
+): T {
+  return pluginTalkSessionDispatchContext.run(context, run);
+}
+
+export function getPluginTalkSessionDispatchContext(
+  clientConnId: string,
+): Omit<PluginTalkSessionDispatchContext, "clientConnId"> | undefined {
+  const context = pluginTalkSessionDispatchContext.getStore();
+  if (!context || context.clientConnId !== clientConnId) {
+    return undefined;
+  }
+  return context;
+}
 
 export class TalkRealtimeSessionRequestError extends Error {}
 

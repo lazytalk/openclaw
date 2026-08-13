@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../test/helpers/promise.js";
 
 const mocks = vi.hoisted(() => ({
   scope: vi.fn(),
-  createSession: vi.fn(),
+  dispatch: vi.fn(),
   sendAudio: vi.fn(),
   cancelOutput: vi.fn(),
   stopSession: vi.fn(),
@@ -12,8 +13,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../plugins/runtime/gateway-request-scope.js", () => ({
   getPluginRuntimeGatewayRequestScope: mocks.scope,
 }));
-vi.mock("./talk-realtime-session-create.js", () => ({
-  createGatewayRealtimeTalkSession: mocks.createSession,
+vi.mock("./server-plugin-in-process-dispatch.js", () => ({
+  dispatchGatewayMethodInProcess: mocks.dispatch,
 }));
 vi.mock("./talk-realtime-relay.js", () => ({
   sendTalkRealtimeRelayAudio: mocks.sendAudio,
@@ -22,13 +23,34 @@ vi.mock("./talk-realtime-relay.js", () => ({
 }));
 
 import { openPluginTalkSession } from "./talk-plugin-session.js";
+import { getPluginTalkSessionDispatchContext } from "./talk-realtime-session-create.js";
+
+type DispatchContext = NonNullable<ReturnType<typeof getPluginTalkSessionDispatchContext>>;
+
+function requireDispatchContext(): DispatchContext {
+  const context = getPluginTalkSessionDispatchContext("plugin-http:127.0.0.1");
+  if (!context) {
+    throw new Error("expected plugin Talk dispatch context");
+  }
+  return context;
+}
 
 describe("plugin Talk session", () => {
   let controller: AbortController;
+  let dispatchContexts: DispatchContext[];
+
+  function capturedDispatchContext(index = 0): DispatchContext {
+    const context = dispatchContexts[index];
+    if (!context) {
+      throw new Error(`expected captured plugin Talk dispatch context at index ${index}`);
+    }
+    return context;
+  }
 
   beforeEach(() => {
     vi.clearAllMocks();
     controller = new AbortController();
+    dispatchContexts = [];
     mocks.scope.mockReturnValue({
       pluginId: "avatar",
       gatewayMethodDispatchAllowed: true,
@@ -38,7 +60,10 @@ describe("plugin Talk session", () => {
       },
       context: { logGateway: { warn: mocks.warn } },
     });
-    mocks.createSession.mockResolvedValue({ relaySessionId: "relay-1" });
+    mocks.dispatch.mockImplementation(async () => {
+      dispatchContexts.push(requireDispatchContext());
+      return { relaySessionId: "relay-1" };
+    });
   });
 
   it("uses the shared Gateway session and maps owner-scoped media events", async () => {
@@ -49,12 +74,19 @@ describe("plugin Talk session", () => {
       voice: "alloy",
       onEvent,
     });
-    const createParams = mocks.createSession.mock.calls[0]?.[0];
+    const createParams = capturedDispatchContext();
 
-    expect(createParams).toMatchObject({
-      context: { logGateway: { warn: mocks.warn } },
-      request: { sessionKey: "agent:main:avatar", voice: "alloy" },
-    });
+    expect(mocks.dispatch).toHaveBeenCalledWith(
+      "talk.session.create",
+      {
+        sessionKey: "agent:main:avatar",
+        mode: "realtime",
+        transport: "gateway-relay",
+        brain: "agent-consult",
+        voice: "alloy",
+      },
+      { requireScopedClient: true },
+    );
     expect(createParams.ownerId).toMatch(/^plugin:avatar:[0-9a-f-]+$/);
     expect(createParams.quotaOwnerId).toBe("plugin:avatar:plugin-http:127.0.0.1");
 
@@ -72,6 +104,7 @@ describe("plugin Talk session", () => {
     });
     createParams.eventSink({ relaySessionId: "relay-1", type: "clear", reason: "barge-in" });
 
+    await vi.waitFor(() => expect(onEvent).toHaveBeenCalledTimes(5));
     expect(onEvent.mock.calls.map(([event]) => event)).toEqual([
       { type: "state", generation: 0, ptsMs: 0, state: "listening" },
       { type: "state", generation: 0, ptsMs: 0, state: "speaking" },
@@ -120,9 +153,8 @@ describe("plugin Talk session", () => {
       onEvent: vi.fn(),
     });
 
-    const createParams = mocks.createSession.mock.calls.map(([params]) => params);
-    expect(createParams[0].ownerId).not.toBe(createParams[1].ownerId);
-    expect(createParams.map((params) => params.quotaOwnerId)).toEqual([
+    expect(capturedDispatchContext(0).ownerId).not.toBe(capturedDispatchContext(1).ownerId);
+    expect(dispatchContexts.map((params) => params.quotaOwnerId)).toEqual([
       "plugin:avatar:plugin-http:127.0.0.1",
       "plugin:avatar:plugin-http:127.0.0.1",
     ]);
@@ -135,11 +167,12 @@ describe("plugin Talk session", () => {
       signal: controller.signal,
       onEvent,
     });
-    const eventSink = mocks.createSession.mock.calls[0]?.[0].eventSink;
+    const eventSink = capturedDispatchContext().eventSink;
 
     eventSink({ relaySessionId: "relay-1", type: "close", reason: "error" });
     eventSink({ relaySessionId: "relay-1", type: "close", reason: "error" });
 
+    await vi.waitFor(() => expect(onEvent).toHaveBeenCalledOnce());
     expect(onEvent).toHaveBeenCalledOnce();
     expect(onEvent).toHaveBeenCalledWith({
       type: "closed",
@@ -161,7 +194,7 @@ describe("plugin Talk session", () => {
         throw new Error("renderer gone");
       },
     });
-    const createParams = mocks.createSession.mock.calls[0]?.[0];
+    const createParams = capturedDispatchContext();
 
     createParams.eventSink({ relaySessionId: "relay-1", type: "ready" });
     await vi.waitFor(() => expect(mocks.stopSession).toHaveBeenCalledOnce());
@@ -174,8 +207,10 @@ describe("plugin Talk session", () => {
   });
 
   it("closes a session whose event callback fails during creation", async () => {
-    mocks.createSession.mockImplementationOnce(async (params) => {
-      params.eventSink({ relaySessionId: "relay-1", type: "ready" });
+    mocks.dispatch.mockImplementationOnce(async () => {
+      const context = requireDispatchContext();
+      dispatchContexts.push(context);
+      context.eventSink({ relaySessionId: "relay-1", type: "ready" });
       return { relaySessionId: "relay-1" };
     });
 
@@ -191,8 +226,42 @@ describe("plugin Talk session", () => {
 
     expect(mocks.stopSession).toHaveBeenCalledWith({
       relaySessionId: "relay-1",
-      connId: mocks.createSession.mock.calls[0]?.[0].ownerId,
+      connId: capturedDispatchContext().ownerId,
     });
+  });
+
+  it("delivers promise-returning event callbacks in order", async () => {
+    const firstDelivery = createDeferred();
+    const deliveries: string[] = [];
+    await openPluginTalkSession({
+      sessionKey: "agent:main:avatar",
+      signal: controller.signal,
+      onEvent: async (event) => {
+        if (event.type !== "state") {
+          return;
+        }
+        deliveries.push(`start:${event.state}`);
+        if (event.state === "listening") {
+          await firstDelivery.promise;
+        }
+        deliveries.push(`end:${event.state}`);
+      },
+    });
+    const eventSink = capturedDispatchContext().eventSink;
+
+    eventSink({ relaySessionId: "relay-1", type: "ready" });
+    eventSink({ relaySessionId: "relay-1", type: "audioStarted", outputGeneration: 1 });
+
+    expect(deliveries).toEqual(["start:listening"]);
+    firstDelivery.resolve();
+    await vi.waitFor(() =>
+      expect(deliveries).toEqual([
+        "start:listening",
+        "end:listening",
+        "start:speaking",
+        "end:speaking",
+      ]),
+    );
   });
 
   it("rejects plugin routes without Talk access", async () => {
@@ -213,7 +282,7 @@ describe("plugin Talk session", () => {
         onEvent: vi.fn(),
       }),
     ).rejects.toThrow("authenticated plugin request with Talk access");
-    expect(mocks.createSession).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
   });
 
   it("requires an entitled request scope and a selected agent session", async () => {
@@ -237,7 +306,7 @@ describe("plugin Talk session", () => {
       signal: controller.signal,
       onEvent: vi.fn(),
     });
-    const createParams = mocks.createSession.mock.calls[0]?.[0];
+    const createParams = capturedDispatchContext();
 
     controller.abort();
 
@@ -249,17 +318,18 @@ describe("plugin Talk session", () => {
 
   it("closes a relay that finishes opening after its connection ends", async () => {
     let resolveSession: ((session: { relaySessionId: string }) => void) | undefined;
-    mocks.createSession.mockReturnValueOnce(
-      new Promise((resolve) => {
+    mocks.dispatch.mockImplementationOnce(async () => {
+      dispatchContexts.push(requireDispatchContext());
+      return await new Promise((resolve) => {
         resolveSession = resolve;
-      }),
-    );
+      });
+    });
     const opening = openPluginTalkSession({
       sessionKey: "agent:main:avatar",
       signal: controller.signal,
       onEvent: vi.fn(),
     });
-    const createParams = mocks.createSession.mock.calls[0]?.[0];
+    const createParams = capturedDispatchContext();
 
     controller.abort(new Error("browser disconnected"));
     resolveSession?.({ relaySessionId: "relay-late" });

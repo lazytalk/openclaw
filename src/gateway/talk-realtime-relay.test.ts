@@ -24,6 +24,7 @@ import type {
 } from "../talk/provider-types.js";
 import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
 import { createChatRunState } from "./server-chat-state.js";
+import type { GatewayRequestContext } from "./server-methods/types.js";
 import { closeTalkRealtimeRelaySessionsForConnection } from "./talk-realtime-relay-operations.js";
 import {
   RELAY_SESSION_TTL_MS,
@@ -4909,7 +4910,7 @@ describe("talk realtime gateway relay", () => {
     const context = {
       broadcastToConnIds: vi.fn(),
       logGateway: { warn: vi.fn() },
-    } as never;
+    } as unknown as GatewayRequestContext;
     const createSession = (connId: string) =>
       createTalkRealtimeRelaySession({
         context,
@@ -4947,7 +4948,7 @@ describe("talk realtime gateway relay", () => {
       broadcastToConnIds: vi.fn(),
       getRuntimeConfig: () => ({}),
       logGateway: { warn: vi.fn() },
-    } as never;
+    } as unknown as GatewayRequestContext;
     const createSession = (connId: string) =>
       createTalkRealtimeRelaySession({
         context,

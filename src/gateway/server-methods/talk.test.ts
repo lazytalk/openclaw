@@ -10,6 +10,8 @@ import type { OpenClawConfig } from "../../config/config.js";
 import { normalizeResolvedSecretInputString } from "../../config/types.secrets.js";
 import { setActiveDegradedSecretOwners } from "../../secrets/runtime-degraded-state.js";
 import { REALTIME_VOICE_DESCRIBE_VIEW_TOOL_NAME } from "../../talk/describe-view-tool.js";
+import { withPluginTalkSessionDispatchContext } from "../talk-realtime-session-create.js";
+import { forgetUnifiedTalkSession } from "../talk-session-registry.js";
 import { buildTalkRealtimeConfig } from "./talk-shared.js";
 import { talkHandlers } from "./talk.js";
 
@@ -1977,6 +1979,74 @@ describe("talk.session unified handlers", () => {
       connId: "conn-1",
     });
     expect(closeRespond).toHaveBeenCalledWith(true, { ok: true }, undefined);
+  });
+
+  it("keeps plugin relay ownership while using canonical session creation", async () => {
+    const provider = {
+      id: "openai",
+      label: "OpenAI Realtime",
+      isConfigured: () => true,
+      createBridge: vi.fn(),
+    };
+    const eventSink = vi.fn();
+    mocks.resolveConfiguredRealtimeVoiceProvider.mockReturnValue({ provider, providerConfig: {} });
+    mocks.createTalkRealtimeRelaySession.mockReturnValue({
+      provider: "openai",
+      transport: "gateway-relay",
+      relaySessionId: "relay-plugin-owner",
+      audio: {
+        inputEncoding: "pcm16",
+        inputSampleRateHz: 24000,
+        outputEncoding: "pcm16",
+        outputSampleRateHz: 24000,
+      },
+      model: "gpt-realtime",
+      voice: "alloy",
+      expiresAt: 1_797_986_400,
+    });
+    const respond = vi.fn();
+
+    try {
+      await withPluginTalkSessionDispatchContext(
+        {
+          clientConnId: "conn-1",
+          ownerId: "plugin:avatar:lifecycle-1",
+          quotaOwnerId: "plugin:avatar:conn-1",
+          eventSink,
+        },
+        async () =>
+          await callTalkHandler("talk.session.create", {
+            params: {
+              sessionKey: "agent:main:main",
+              mode: "realtime",
+              transport: "gateway-relay",
+              brain: "agent-consult",
+              provider: "openai",
+            },
+            respond,
+            context: {
+              getRuntimeConfig: () =>
+                ({
+                  talk: {
+                    realtime: { provider: "openai", providers: { openai: {} } },
+                  },
+                }) as OpenClawConfig,
+              logGateway: { warn: vi.fn() },
+            },
+          }),
+      );
+    } finally {
+      forgetUnifiedTalkSession("relay-plugin-owner");
+    }
+
+    expect(mocks.createTalkRealtimeRelaySession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connId: "plugin:avatar:lifecycle-1",
+        quotaOwnerId: "plugin:avatar:conn-1",
+        eventSink,
+      }),
+    );
+    expectRespondOk(respond, { relaySessionId: "relay-plugin-owner" });
   });
 
   it("uses talk.agentId for a bare realtime session in an explicit fleet", async () => {
