@@ -75,20 +75,11 @@ function resolveOpenRouterProviderConfigParams(
   }
 
   const providers = Object.entries(ctx.config?.models?.providers ?? {});
-  const exactKey = providers.find(([provider]) => provider.trim() === requestedProvider)?.[0];
-  const fallbackKey = providers.find(
-    ([provider]) => normalizeProviderId(provider) === normalizedProvider,
-  )?.[0];
-  const providerKey = (exactKey ?? fallbackKey)?.trim();
-  if (!providerKey) {
-    return undefined;
-  }
-
   // Preserve routing split across normalized duplicates; merge nested params
   // field-wise while allowing later scalar settings to override earlier ones.
   let matchedParams: Record<string, unknown> | undefined;
   for (const [provider, config] of providers) {
-    if (provider.trim() !== providerKey) {
+    if (normalizeProviderId(provider) !== normalizedProvider) {
       continue;
     }
     const params = readRecord(config.params);

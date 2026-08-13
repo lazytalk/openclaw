@@ -1145,13 +1145,13 @@ describe("openrouter provider hooks", () => {
     });
   });
 
-  it("merges routing split across trimmed duplicate OpenRouter provider keys", async () => {
+  it("merges routing split across case- and whitespace-equivalent OpenRouter keys", async () => {
     const provider = await registerSingleProviderPlugin(openrouterPlugin);
     const patch = provider.extraParamsForTransport?.({
       config: {
         models: {
           providers: {
-            " openrouter ": {
+            " OpenRouter ": {
               params: {
                 provider: {
                   order: ["anthropic"],
