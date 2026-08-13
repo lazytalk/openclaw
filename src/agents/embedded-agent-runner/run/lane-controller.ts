@@ -249,10 +249,7 @@ export function createEmbeddedRunLaneController<TParams extends LaneParams>(opti
     let queuedRun: Promise<T>;
     try {
       if (params.enqueue) {
-        queuedRun = params.enqueue(
-          task,
-          withLaneTimeout(withRunLaneWait(sessionOpts), true),
-        );
+        queuedRun = params.enqueue(task, withLaneTimeout(withRunLaneWait(sessionOpts), true));
       } else {
         noteLaneWaitIfBusy(options.sessionLane);
         queuedRun = enqueueCommandInLane(

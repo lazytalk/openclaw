@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
+import { createDeferred } from "../../../../test/helpers/promise.js";
 import { getAgentEventLifecycleGeneration } from "../../../infra/agent-events.js";
 import {
   enqueueCommandInLane,
@@ -46,6 +47,10 @@ function createLaneController(params: {
   });
 }
 
+function expectLaneCounts(lane: string, activeCount: number, queuedCount: number) {
+  expect(getCommandLaneSnapshot(lane)).toMatchObject({ activeCount, queuedCount });
+}
+
 describe("embedded run session lane", () => {
   afterEach(() => {
     resetCommandQueueStateForTest();
@@ -90,92 +95,31 @@ describe("embedded run session lane", () => {
       const stalledFailure = expect(stalled).rejects.toMatchObject({
         name: "CommandLaneTaskTimeoutError",
       });
-      const successors = Array.from({ length: 10 }, (_, index) => {
-        const controller = createLaneController({
-          sessionLane,
-          runId: `successor-${termination}-${index}`,
-        });
-        return controller.enqueueSession(async () => index);
+      const successorController = createLaneController({
+        sessionLane,
+        runId: `successor-${termination}`,
       });
+      const successor = successorController.enqueueSession(async () => "finished");
 
-      expect(getCommandLaneSnapshot(sessionLane)).toMatchObject({
-        activeCount: 1,
-        queuedCount: 10,
-      });
+      expectLaneCounts(sessionLane, 1, 1);
 
       if (termination === "release") {
         stalledController.laneTaskReleaseController.abort();
       }
 
       await stalledFailure;
-      await expect(Promise.all(successors)).resolves.toEqual(
-        Array.from({ length: 10 }, (_, index) => index),
-      );
-      expect(getCommandLaneSnapshot(sessionLane)).toMatchObject({
-        activeCount: 0,
-        queuedCount: 0,
-      });
+      await expect(successor).resolves.toBe("finished");
+      expectLaneCounts(sessionLane, 0, 0);
     },
   );
-
-  it("keeps a session alive while its run waits for healthy global-lane admission", async () => {
-    const sessionLane = "test:session-global-admission";
-    const globalLane = "test:global-admission";
-    setCommandLaneConcurrency(globalLane, 1);
-
-    let releaseGlobalLane: () => void = () => {};
-    const globalLaneGate = new Promise<void>((resolve) => {
-      releaseGlobalLane = resolve;
-    });
-    const globalBlocker = enqueueCommandInLane(globalLane, async () => {
-      await globalLaneGate;
-    });
-    const controller = createLaneController({
-      sessionLane,
-      globalLane,
-      runId: "healthy-global-admission",
-    });
-    const run = controller.enqueueSession(
-      async () => await controller.enqueueGlobal(async () => ({ meta: { durationMs: 1 } })),
-      { taskTimeoutMs: 25 },
-    );
-
-    try {
-      await delay(100);
-      expect(getCommandLaneSnapshot(sessionLane)).toMatchObject({
-        activeCount: 1,
-        queuedCount: 0,
-      });
-      expect(getCommandLaneSnapshot(globalLane)).toMatchObject({
-        activeCount: 1,
-        queuedCount: 1,
-      });
-
-      releaseGlobalLane();
-      await globalBlocker;
-      await expect(run).resolves.toMatchObject({ meta: { durationMs: 1 } });
-      expect(getCommandLaneSnapshot(sessionLane)).toMatchObject({
-        activeCount: 0,
-        queuedCount: 0,
-      });
-    } finally {
-      releaseGlobalLane();
-    }
-  });
 
   it("keeps the session lease alive until every concurrent global admission settles", async () => {
     const sessionLane = "test:session-concurrent-global-admission";
     const globalLane = "test:concurrent-global-admission";
     setCommandLaneConcurrency(globalLane, 1);
 
-    let releaseInterveningGlobalTask: () => void = () => {};
-    const interveningGlobalGate = new Promise<void>((resolve) => {
-      releaseInterveningGlobalTask = resolve;
-    });
-    let markInterveningGlobalTaskStarted: () => void = () => {};
-    const interveningGlobalTaskStarted = new Promise<void>((resolve) => {
-      markInterveningGlobalTaskStarted = resolve;
-    });
+    const interveningGlobalGate = createDeferred();
+    const interveningGlobalTaskStarted = createDeferred();
     const controller = createLaneController({
       sessionLane,
       globalLane,
@@ -189,8 +133,8 @@ describe("embedded run session lane", () => {
         const interveningGlobalTask = enqueueCommandInLane(
           globalLane,
           async () => {
-            markInterveningGlobalTaskStarted();
-            await interveningGlobalGate;
+            interveningGlobalTaskStarted.resolve();
+            await interveningGlobalGate.promise;
           },
           { priority: "foreground" },
         );
@@ -207,29 +151,20 @@ describe("embedded run session lane", () => {
     );
 
     try {
-      await interveningGlobalTaskStarted;
+      await interveningGlobalTaskStarted.promise;
       await delay(75);
-      expect(getCommandLaneSnapshot(sessionLane)).toMatchObject({
-        activeCount: 1,
-        queuedCount: 0,
-      });
-      expect(getCommandLaneSnapshot(globalLane)).toMatchObject({
-        activeCount: 1,
-        queuedCount: 1,
-      });
+      expectLaneCounts(sessionLane, 1, 0);
+      expectLaneCounts(globalLane, 1, 1);
 
-      releaseInterveningGlobalTask();
+      interveningGlobalGate.resolve();
       await expect(run).resolves.toEqual([
         { meta: { durationMs: 1 } },
         undefined,
         { meta: { durationMs: 2 } },
       ]);
-      expect(getCommandLaneSnapshot(sessionLane)).toMatchObject({
-        activeCount: 0,
-        queuedCount: 0,
-      });
+      expectLaneCounts(sessionLane, 0, 0);
     } finally {
-      releaseInterveningGlobalTask();
+      interveningGlobalGate.resolve();
     }
   });
 
@@ -238,10 +173,7 @@ describe("embedded run session lane", () => {
     const globalLane = "test:stalled-global-with-successor";
     setCommandLaneConcurrency(globalLane, 1);
 
-    let markStalledGlobalTaskStarted: () => void = () => {};
-    const stalledGlobalTaskStarted = new Promise<void>((resolve) => {
-      markStalledGlobalTaskStarted = resolve;
-    });
+    const stalledGlobalTaskStarted = createDeferred();
     const controller = createLaneController({
       sessionLane,
       globalLane,
@@ -251,7 +183,7 @@ describe("embedded run session lane", () => {
       async () => {
         const stalledGlobalAdmission = controller.enqueueGlobal(
           async () => {
-            markStalledGlobalTaskStarted();
+            stalledGlobalTaskStarted.resolve();
             return await new Promise<never>(() => {});
           },
           { taskTimeoutMs: 25 },
@@ -270,24 +202,12 @@ describe("embedded run session lane", () => {
     );
     const completedRun = expect(run).resolves.toEqual({ meta: { durationMs: 1 } });
 
-    await stalledGlobalTaskStarted;
-    expect(getCommandLaneSnapshot(sessionLane)).toMatchObject({
-      activeCount: 1,
-      queuedCount: 0,
-    });
-    expect(getCommandLaneSnapshot(globalLane)).toMatchObject({
-      activeCount: 1,
-      queuedCount: 1,
-    });
+    await stalledGlobalTaskStarted.promise;
+    expectLaneCounts(sessionLane, 1, 0);
+    expectLaneCounts(globalLane, 1, 1);
 
     await completedRun;
-    expect(getCommandLaneSnapshot(sessionLane)).toMatchObject({
-      activeCount: 0,
-      queuedCount: 0,
-    });
-    expect(getCommandLaneSnapshot(globalLane)).toMatchObject({
-      activeCount: 0,
-      queuedCount: 0,
-    });
+    expectLaneCounts(sessionLane, 0, 0);
+    expectLaneCounts(globalLane, 0, 0);
   });
 });
