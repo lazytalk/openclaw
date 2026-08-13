@@ -540,6 +540,47 @@ describe("openrouter provider hooks", () => {
     expect(contribution?.dynamicSuffix).toContain("Analysis models: deepseek/deepseek-v4-pro.");
   });
 
+  it("describes Fusion config from the selected agent model", async () => {
+    const provider = await registerSingleProviderPlugin(openrouterPlugin);
+    const contribution = provider.resolveSystemPromptContribution?.({
+      provider: "openrouter",
+      modelId: "openrouter/fusion",
+      promptMode: "full",
+      agentId: "analyst",
+      config: {
+        agents: {
+          defaults: {
+            models: {
+              "openrouter/fusion": {
+                params: {
+                  extraBody: {
+                    plugins: [{ id: "fusion", analysis_models: ["default/model"] }],
+                  },
+                },
+              },
+            },
+          },
+          entries: {
+            analyst: {
+              models: {
+                "openrouter/fusion": {
+                  params: {
+                    extraBody: {
+                      plugins: [{ id: "fusion", analysis_models: ["agent/model"] }],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    } as never);
+
+    expect(contribution?.dynamicSuffix).toContain("Analysis models: agent/model.");
+    expect(contribution?.dynamicSuffix).not.toContain("default/model");
+  });
+
   it("matches transport alias precedence for Fusion extra body", async () => {
     const provider = await registerSingleProviderPlugin(openrouterPlugin);
     const contribution = provider.resolveSystemPromptContribution?.({
