@@ -189,7 +189,6 @@ export const qaChannelMessageActions: ChannelMessageActionAdapter = {
           to: buildQaTarget({
             chatType: parsed.chatType,
             conversationId: parsed.conversationId,
-            threadId: resolved.threadId,
           }),
           text,
           senderId: account.botUserId,
@@ -232,7 +231,6 @@ export const qaChannelMessageActions: ChannelMessageActionAdapter = {
           to: buildQaTarget({
             chatType: target.conversationKind,
             conversationId: target.conversationId,
-            threadId: target.threadId,
           }),
           text,
           senderId: account.botUserId,

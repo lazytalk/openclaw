@@ -376,7 +376,7 @@ export abstract class QaStateBackedTransportAdapter implements QaTransportAdapte
     timeoutMs?: number;
     pollIntervalMs?: number;
   }) => Promise<void>;
-  abstract buildAgentDelivery: (params: { target: string }) => {
+  abstract buildAgentDelivery: (params: { target: string; threadId?: string }) => {
     channel: string;
     to?: string;
     replyChannel: string;

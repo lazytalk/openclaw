@@ -77,7 +77,10 @@ async function startAgentRun(
 ) {
   if (params.taskTracking === false) {
     const target = params.to ?? "dm:qa-operator";
-    const delivery = env.transport.buildAgentDelivery({ target });
+    const delivery = env.transport.buildAgentDelivery({
+      target,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+    });
     const started = (await env.gateway.call(
       "chat.send",
       {
@@ -98,7 +101,10 @@ async function startAgentRun(
     return started;
   }
   const target = params.to ?? "dm:qa-operator";
-  const delivery = env.transport.buildAgentDelivery({ target });
+  const delivery = env.transport.buildAgentDelivery({
+    target,
+    ...(params.threadId ? { threadId: params.threadId } : {}),
+  });
   const started = (await env.gateway.call(
     "agent",
     {

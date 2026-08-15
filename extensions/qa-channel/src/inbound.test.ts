@@ -152,9 +152,18 @@ describe("handleQaInbound", () => {
         replyToId: "msg-1",
         text: "preview",
         threadId: "42",
-        to: "thread:qa-room/42",
+        to: "group:qa-room",
       }),
     );
+    expect(assembled.ctxPayload).toMatchObject({
+      To: "group:qa-room",
+      OriginatingTo: "group:qa-room",
+      SessionKey: expect.stringMatching(/:thread:42$/u),
+    });
+    expect(assembled.ctxPayload.ParentSessionKey).toBe(
+      assembled.ctxPayload.SessionKey?.replace(/:thread:42$/u, ""),
+    );
+    expect(assembled.route.sessionKey).toBe(assembled.ctxPayload.SessionKey);
     expect(editQaBusMessage).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ messageId: "preview-1", text: "preview expanded" }),
