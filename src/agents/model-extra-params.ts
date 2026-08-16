@@ -4,7 +4,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { modelKey } from "../shared/model-key.js";
 import { resolveAgentConfig } from "./agent-scope-config.js";
 
-export type ModelExtraParamSources = {
+type ModelExtraParamSources = {
   defaultParams?: Record<string, unknown>;
   modelParams?: Record<string, unknown>;
   agentEntryParams?: Record<string, unknown>;
