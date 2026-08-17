@@ -90,6 +90,8 @@ async function startAgentRun(
         deliver: true,
         originatingChannel: delivery.replyChannel,
         originatingTo: delivery.replyTo,
+        // chat.send routes threads separately; omitting this replies at the conversation root.
+        originatingThreadId: params.threadId,
       },
       {
         timeoutMs: params.timeoutMs ?? 30_000,
