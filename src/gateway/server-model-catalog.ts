@@ -13,28 +13,23 @@ import { isPreparedModelCatalogFull } from "../agents/prepared-model-runtime.ful
 // Gateway catalog reads use the atomic prepared runtime generation.
 import { getRuntimeConfig } from "../config/io.js";
 import type { PreparedGatewayModelCatalogSnapshot } from "./server-model-catalog-auth.js";
-import type { GatewayModelCatalogSnapshot } from "./server-model-catalog.types.js";
+import type {
+  GatewayModelCatalogLoadParams,
+  GatewayModelCatalogSnapshot,
+} from "./server-model-catalog.types.js";
 
 export type GatewayModelChoice = import("../agents/model-catalog.js").ModelCatalogEntry;
 export type { GatewayModelCatalogSnapshot } from "./server-model-catalog.types.js";
 
 type GatewayModelCatalogConfig = ReturnType<typeof getRuntimeConfig>;
-type LoadPublishedPreparedModelCatalogOwnerSnapshot = (params: {
-  agentId?: string;
-  agentDir?: string;
-  config: GatewayModelCatalogConfig;
-  readOnly?: boolean;
-  refreshFullCatalog?: boolean;
-  workspaceDir?: string;
-}) => Promise<PublishedModelCatalogOwnerCandidate>;
-type LoadGatewayModelCatalogParams = {
-  agentId?: string;
-  agentDir?: string;
+type LoadPublishedPreparedModelCatalogOwnerSnapshot = (
+  params: GatewayModelCatalogLoadParams & {
+    config: GatewayModelCatalogConfig;
+  },
+) => Promise<PublishedModelCatalogOwnerCandidate>;
+type LoadGatewayModelCatalogParams = GatewayModelCatalogLoadParams & {
   getConfig?: () => GatewayModelCatalogConfig;
   loadPublishedPreparedModelCatalogOwnerSnapshot?: LoadPublishedPreparedModelCatalogOwnerSnapshot;
-  readOnly?: boolean;
-  refreshFullCatalog?: boolean;
-  workspaceDir?: string;
 };
 type LoadPreparedGatewayModelCatalogParams = LoadGatewayModelCatalogParams & {
   authScope?: PreparedModelRuntimeAuthScope;
@@ -76,8 +71,12 @@ async function loadGatewayModelCatalogOwnerSnapshot(
     ...(params?.agentId ? { agentId: params.agentId } : {}),
     ...(params?.agentDir ? { agentDir: params.agentDir } : {}),
     config: (params?.getConfig ?? getRuntimeConfig)(),
+    ...(params?.providerDiscoveryProviderIds
+      ? { providerDiscoveryProviderIds: params.providerDiscoveryProviderIds }
+      : {}),
     readOnly: params?.readOnly !== false,
     ...(params?.refreshFullCatalog ? { refreshFullCatalog: true } : {}),
+    ...(params?.scopedLiveProviderDiscovery ? { scopedLiveProviderDiscovery: true } : {}),
     ...(params?.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
   });
   const owner = resolvePublishedModelCatalogOwner(candidate);

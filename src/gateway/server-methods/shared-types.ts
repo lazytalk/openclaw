@@ -51,7 +51,10 @@ import type {
   GatewayApprovalEventPublisher,
   GatewayRecoveryRuntime,
 } from "../server-instance-runtime.types.js";
-import type { GatewayModelCatalogSnapshot } from "../server-model-catalog.types.js";
+import type {
+  GatewayModelCatalogLoadParams,
+  GatewayModelCatalogSnapshot,
+} from "../server-model-catalog.types.js";
 import type { DedupeEntry } from "../server-shared.js";
 import type { GatewayEventLoopHealth } from "../server/event-loop-health.js";
 import type { SessionObserverService } from "../session-observer-contract.js";
@@ -261,18 +264,10 @@ type GatewayKernelContext = {
     sessionKey: string,
     client: GatewayClient | null,
   ) => SessionApprovalReplay;
-  loadGatewayModelCatalog: (params?: {
-    agentId?: string;
-    agentDir?: string;
-    readOnly?: boolean;
-    workspaceDir?: string;
-  }) => Promise<ModelCatalogEntry[]>;
-  loadGatewayModelCatalogSnapshot: (params?: {
-    agentId?: string;
-    agentDir?: string;
-    readOnly?: boolean;
-    workspaceDir?: string;
-  }) => Promise<GatewayModelCatalogSnapshot>;
+  loadGatewayModelCatalog: (params?: GatewayModelCatalogLoadParams) => Promise<ModelCatalogEntry[]>;
+  loadGatewayModelCatalogSnapshot: (
+    params?: GatewayModelCatalogLoadParams,
+  ) => Promise<GatewayModelCatalogSnapshot>;
   readPreparedGatewayModelCatalog?: (params?: {
     agentId?: string;
     agentDir?: string;

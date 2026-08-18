@@ -310,6 +310,15 @@ async function loadPreparedModelCatalogOwnerSnapshotWithPolicy(
     ? getPreparedModelCatalogOwnerSnapshot(params)
     : undefined;
   const snapshot = await resolvePreparedModelCatalogOwnerSnapshotWithPolicy(params, configPolicy);
+  if (params.readOnly && params.providerDiscoveryProviderIds) {
+    const modelCatalog = await loadScopedReadOnlyModelCatalog({
+      ...params,
+      agentDir: snapshot.agentDir,
+      config: snapshot.config,
+      ...(snapshot.workspaceDir ? { workspaceDir: snapshot.workspaceDir } : {}),
+    });
+    return Object.freeze({ ...snapshot, modelCatalog });
+  }
   // A fallback read-only lease retires before this projection. Only a published owner can safely
   // expose its generation cache; the leased snapshot already contains its exact prepared facts.
   if (params.readOnly && !publishedReadOnlyOwner) {

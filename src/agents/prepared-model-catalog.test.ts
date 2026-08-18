@@ -55,6 +55,8 @@ vi.mock("./prepared-model-runtime.full-catalog.js", () => ({
 }));
 
 vi.mock("./prepared-model-runtime.scoped-catalog.js", () => ({
+  prepareScopedReadOnlyLiveModelCatalog: (...args: unknown[]) =>
+    mocks.prepareScopedCatalog(...args),
   prepareScopedReadOnlyModelCatalog: (...args: unknown[]) => mocks.prepareScopedCatalog(...args),
 }));
 
@@ -277,6 +279,39 @@ describe("prepared model catalog access", () => {
       expect(mocks.acquireSnapshot).not.toHaveBeenCalled();
     },
   );
+
+  it("projects provider-scoped live discovery through the published owner", async () => {
+    const scopedCatalog = {
+      entries: [{ provider: "anthropic", id: "claude-opus", name: "Claude Opus" }],
+      routeVariants: [],
+    };
+    const committedSnapshot = {
+      ...fullSnapshot,
+      agentDir: "/tmp/prepared-model-catalog-agent",
+      config: { agents: { defaults: { model: "anthropic/claude-opus" } } },
+      workspaceDir: "/tmp/prepared-model-catalog-workspace",
+    };
+    mocks.prepareSnapshot.mockResolvedValue(committedSnapshot);
+    mocks.isFullCatalog.mockReturnValue(false);
+    mocks.prepareScopedCatalog.mockResolvedValue(scopedCatalog);
+
+    await expect(
+      loadPublishedPreparedModelCatalogOwnerSnapshot({
+        providerDiscoveryProviderIds: ["anthropic"],
+        readOnly: true,
+        scopedLiveProviderDiscovery: true,
+      }),
+    ).resolves.toEqual({ ...committedSnapshot, modelCatalog: scopedCatalog });
+    expect(mocks.prepareScopedCatalog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentDir: committedSnapshot.agentDir,
+        config: committedSnapshot.config,
+        readOnly: true,
+        workspaceDir: committedSnapshot.workspaceDir,
+      }),
+      ["anthropic"],
+    );
+  });
 
   it("restores the unique configured agent identity for a published replacement owner", async () => {
     const committedSnapshot = {
