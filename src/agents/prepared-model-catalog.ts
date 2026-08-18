@@ -15,7 +15,9 @@ import type { ResolvedPublishedModelCatalogOwner } from "./prepared-model-catalo
 import {
   getPreparedModelFullCatalogAuth,
   getPreparedModelRuntimeAuthMaterializations,
+  getPreparedModelRuntimeAuthStore,
   loadPreparedModelRuntimeAuth,
+  type PreparedModelRuntimeAuth,
   setPreparedModelRuntimeAuthMaterializations,
   setPreparedModelRuntimeAuthLoader,
   setPreparedModelRuntimeAuthStore,
@@ -64,6 +66,29 @@ export type GetPublishedPreparedModelCatalogOwnerParams = Omit<
 
 type PreparedModelCatalogConfigPolicy = "exact" | "published";
 
+/** Rebinds private auth facts whenever an immutable catalog owner is projected. */
+function projectPreparedModelRuntimeSnapshot(params: {
+  snapshot: PreparedModelRuntimeSnapshot;
+  auth: PreparedModelRuntimeAuth;
+  modelCatalog: ModelCatalogSnapshot;
+}): PreparedModelRuntimeSnapshot {
+  const projected = Object.freeze({
+    ...params.snapshot,
+    authModes: params.auth.authModes,
+    modelCatalog: params.modelCatalog,
+  });
+  setPreparedModelRuntimeAuthStore(projected, params.auth.authStore);
+  setPreparedModelRuntimeAuthLoader(
+    projected,
+    async (scope) => (await loadPreparedModelRuntimeAuth(params.snapshot, scope)) ?? params.auth,
+  );
+  setPreparedModelRuntimeAuthMaterializations(
+    projected,
+    getPreparedModelRuntimeAuthMaterializations(params.snapshot),
+  );
+  return projected;
+}
+
 async function materializeRequestedModelCatalog(
   snapshot: PreparedModelRuntimeSnapshot,
   readOnly: boolean | undefined,
@@ -83,23 +108,9 @@ async function materializeRequestedModelCatalog(
   if (!fullAuth) {
     throw new Error("prepared full model catalog omitted its auth generation");
   }
-  const materialized = Object.freeze({
-    ...snapshot,
-    authModes: fullAuth.authModes,
-    modelCatalog,
-  });
-  setPreparedModelRuntimeAuthStore(materialized, fullAuth.authStore);
   // Later explicit auth refreshes stay bound to the original owner generation. Ordinary reads
   // consume the full worker's paired auth without invoking this loader.
-  setPreparedModelRuntimeAuthLoader(
-    materialized,
-    async (scope) => (await loadPreparedModelRuntimeAuth(snapshot, scope)) ?? fullAuth,
-  );
-  setPreparedModelRuntimeAuthMaterializations(
-    materialized,
-    getPreparedModelRuntimeAuthMaterializations(snapshot),
-  );
-  return materialized;
+  return projectPreparedModelRuntimeSnapshot({ snapshot, auth: fullAuth, modelCatalog });
 }
 
 function acceptsPreparedSnapshotConfig(
@@ -317,7 +328,15 @@ async function loadPreparedModelCatalogOwnerSnapshotWithPolicy(
       config: snapshot.config,
       ...(snapshot.workspaceDir ? { workspaceDir: snapshot.workspaceDir } : {}),
     });
-    return Object.freeze({ ...snapshot, modelCatalog });
+    const authStore = getPreparedModelRuntimeAuthStore(snapshot);
+    if (!authStore) {
+      throw new Error("prepared scoped model catalog omitted its auth generation");
+    }
+    return projectPreparedModelRuntimeSnapshot({
+      snapshot,
+      auth: { authModes: snapshot.authModes, authStore },
+      modelCatalog,
+    });
   }
   // A fallback read-only lease retires before this projection. Only a published owner can safely
   // expose its generation cache; the leased snapshot already contains its exact prepared facts.

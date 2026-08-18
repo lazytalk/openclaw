@@ -60,6 +60,10 @@ vi.mock("./prepared-model-runtime.scoped-catalog.js", () => ({
   prepareScopedReadOnlyModelCatalog: (...args: unknown[]) => mocks.prepareScopedCatalog(...args),
 }));
 
+import {
+  loadGatewayModelCatalogSnapshot,
+  loadPreparedGatewayModelCatalogSnapshot,
+} from "../gateway/server-model-catalog.js";
 import { PreparedModelCatalogConfigReplacedError } from "./prepared-model-catalog.errors.js";
 import {
   getPublishedPreparedModelCatalogOwnerSnapshot,
@@ -71,8 +75,11 @@ import {
   loadPublishedPreparedModelCatalogOwnerSnapshot,
 } from "./prepared-model-catalog.js";
 import {
+  getPreparedModelRuntimeAuthMaterializations,
   getPreparedModelRuntimeAuthStore,
   setPreparedModelFullCatalogAuth,
+  setPreparedModelRuntimeAuthLoader,
+  setPreparedModelRuntimeAuthMaterializations,
   setPreparedModelRuntimeAuthStore,
 } from "./prepared-model-runtime-auth.js";
 import { PreparedModelRuntimeOwnerNotPublishedError } from "./prepared-model-runtime.js";
@@ -285,23 +292,75 @@ describe("prepared model catalog access", () => {
       entries: [{ provider: "anthropic", id: "claude-opus", name: "Claude Opus" }],
       routeVariants: [],
     };
+    const { authStore, ...committedFacts } = fullSnapshot;
     const committedSnapshot = {
-      ...fullSnapshot,
+      ...committedFacts,
       agentDir: "/tmp/prepared-model-catalog-agent",
       config: { agents: { defaults: { model: "anthropic/claude-opus" } } },
       workspaceDir: "/tmp/prepared-model-catalog-workspace",
     };
+    setPreparedModelRuntimeAuthStore(committedSnapshot, authStore);
+    const refreshedAuthStore = {
+      version: 1 as const,
+      profiles: {
+        "anthropic:runtime": {
+          type: "api_key" as const,
+          provider: "anthropic",
+          key: "runtime-key", // pragma: allowlist secret
+        },
+      },
+    };
+    const loadAuth = vi.fn(async () => ({
+      authModes: { anthropic: "api_key" as const },
+      authStore: refreshedAuthStore,
+    }));
+    setPreparedModelRuntimeAuthLoader(committedSnapshot, loadAuth);
+    const materializations = [
+      {
+        provider: "anthropic",
+        modelId: "claude-opus",
+        modelApi: "anthropic-messages",
+        modelBaseUrl: "https://api.anthropic.com",
+        requestTransportOverrides: "none" as const,
+        authMode: "api_key",
+        runtimeOwnerId: "anthropic:runtime",
+      },
+    ];
+    setPreparedModelRuntimeAuthMaterializations(committedSnapshot, materializations);
     mocks.prepareSnapshot.mockResolvedValue(committedSnapshot);
     mocks.isFullCatalog.mockReturnValue(false);
     mocks.prepareScopedCatalog.mockResolvedValue(scopedCatalog);
 
+    const projected = await loadPublishedPreparedModelCatalogOwnerSnapshot({
+      providerDiscoveryProviderIds: ["anthropic"],
+      readOnly: true,
+      scopedLiveProviderDiscovery: true,
+    });
+    expect(projected).toEqual({ ...committedSnapshot, modelCatalog: scopedCatalog });
+    expect(projected).not.toHaveProperty("authStore");
+    expect(getPreparedModelRuntimeAuthStore(projected)).toBe(authStore);
+    expect(getPreparedModelRuntimeAuthMaterializations(projected)).toBe(materializations);
     await expect(
-      loadPublishedPreparedModelCatalogOwnerSnapshot({
+      loadGatewayModelCatalogSnapshot({
+        getConfig: () => committedSnapshot.config,
+        loadPublishedPreparedModelCatalogOwnerSnapshot: async () => projected,
         providerDiscoveryProviderIds: ["anthropic"],
         readOnly: true,
         scopedLiveProviderDiscovery: true,
       }),
-    ).resolves.toEqual({ ...committedSnapshot, modelCatalog: scopedCatalog });
+    ).resolves.toMatchObject({ entries: scopedCatalog.entries });
+    await expect(
+      loadPreparedGatewayModelCatalogSnapshot({
+        getConfig: () => committedSnapshot.config,
+        loadPublishedPreparedModelCatalogOwnerSnapshot: async () => projected,
+        refreshAuth: true,
+      }),
+    ).resolves.toMatchObject({
+      authModes: { anthropic: "api_key" },
+      authStore: refreshedAuthStore,
+      authMaterializations: materializations,
+    });
+    expect(loadAuth).toHaveBeenCalledOnce();
     expect(mocks.prepareScopedCatalog).toHaveBeenCalledWith(
       expect.objectContaining({
         agentDir: committedSnapshot.agentDir,
