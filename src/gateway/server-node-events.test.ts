@@ -2024,27 +2024,7 @@ describe("agent request events", () => {
 
   it("scopes node-session image capability discovery to the selected provider", async () => {
     const ctx = buildCtx();
-    const loadGatewayModelCatalogSnapshot = vi.fn<
-      NonNullable<NodeEventContext["loadGatewayModelCatalogSnapshot"]>
-    >(async (params) => ({
-      agentId: "main",
-      agentDir: "/tmp/openclaw-agent-main",
-      workspaceDir: "/tmp/openclaw-workspace-main",
-      config: {},
-      catalogComplete: false,
-      entries: params?.scopedLiveProviderDiscovery
-        ? [
-            {
-              id: "runtime-vision",
-              name: "Runtime vision",
-              provider: "test-provider",
-              input: ["text", "image"],
-            },
-          ]
-        : [],
-      routeVariants: [],
-    }));
-    ctx.loadGatewayModelCatalogSnapshot = loadGatewayModelCatalogSnapshot;
+    runtimeMocks.resolveGatewayModelSupportsImages.mockResolvedValueOnce(true);
     loadSessionEntryMock.mockReturnValueOnce({
       ...buildSessionLookup("agent:main:main", {
         model: "runtime-vision",
@@ -2069,11 +2049,12 @@ describe("agent request events", () => {
       }),
     });
 
-    expect(loadGatewayModelCatalogSnapshot).toHaveBeenNthCalledWith(2, {
+    expect(runtimeMocks.resolveGatewayModelSupportsImages).toHaveBeenCalledWith({
       agentId: "main",
-      providerDiscoveryProviderIds: ["test-provider"],
-      readOnly: true,
-      scopedLiveProviderDiscovery: true,
+      loadGatewayModelCatalog: ctx.loadGatewayModelCatalog,
+      loadGatewayModelCatalogSnapshot: ctx.loadGatewayModelCatalogSnapshot,
+      model: "runtime-vision",
+      provider: "test-provider",
     });
     const parseCall = mockCall(parseMessageWithAttachmentsMock);
     expectFields(parseCall?.[2], { supportsInlineImages: true });
