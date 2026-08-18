@@ -2022,6 +2022,63 @@ describe("agent request events", () => {
     expectFields(parseCall?.[2], { supportsInlineImages: false });
   });
 
+  it("scopes node-session image capability discovery to the selected provider", async () => {
+    const ctx = buildCtx();
+    const loadGatewayModelCatalogSnapshot = vi.fn<
+      NonNullable<NodeEventContext["loadGatewayModelCatalogSnapshot"]>
+    >(async (params) => ({
+      agentId: "main",
+      agentDir: "/tmp/openclaw-agent-main",
+      workspaceDir: "/tmp/openclaw-workspace-main",
+      config: {},
+      catalogComplete: false,
+      entries: params?.scopedLiveProviderDiscovery
+        ? [
+            {
+              id: "runtime-vision",
+              name: "Runtime vision",
+              provider: "test-provider",
+              input: ["text", "image"],
+            },
+          ]
+        : [],
+      routeVariants: [],
+    }));
+    ctx.loadGatewayModelCatalogSnapshot = loadGatewayModelCatalogSnapshot;
+    loadSessionEntryMock.mockReturnValueOnce({
+      ...buildSessionLookup("agent:main:main", {
+        model: "runtime-vision",
+        modelProvider: "test-provider",
+      }),
+      canonicalKey: "agent:main:main",
+    });
+
+    await handleNodeEvent(ctx, "node-runtime-vision", {
+      event: "agent.request",
+      payloadJSON: JSON.stringify({
+        message: "describe",
+        sessionKey: "agent:main:main",
+        attachments: [
+          {
+            type: "image",
+            mimeType: "image/png",
+            fileName: "dot.png",
+            content: "AAAA",
+          },
+        ],
+      }),
+    });
+
+    expect(loadGatewayModelCatalogSnapshot).toHaveBeenNthCalledWith(2, {
+      agentId: "main",
+      providerDiscoveryProviderIds: ["test-provider"],
+      readOnly: true,
+      scopedLiveProviderDiscovery: true,
+    });
+    const parseCall = mockCall(parseMessageWithAttachmentsMock);
+    expectFields(parseCall?.[2], { supportsInlineImages: true });
+  });
+
   it("passes ordered durable media metadata to the agent transcript recorder", async () => {
     parseMessageWithAttachmentsMock.mockResolvedValueOnce({
       message: "describe\n[media attached: media://inbound/offloaded]",
