@@ -325,7 +325,7 @@ function relayEventDeliveryOptions(
 export function ensureRelayTurn(session: RelaySession): string {
   const turn = session.harness.talk.ensureTurn();
   if (turn.event) {
-    broadcastToOwner(session.context, session.connId, {
+    publishTalkRealtimeRelayEvent(session, {
       relaySessionId: session.id,
       type: "inputAudio",
       byteLength: 0,

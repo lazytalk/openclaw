@@ -13,7 +13,7 @@ import { authorizeOperatorScopesForMethod } from "./method-scopes.js";
 import { dispatchGatewayMethodInProcess } from "./server-plugin-in-process-dispatch.js";
 import type { TalkRealtimeRelayEvent } from "./talk-realtime-relay-state.js";
 import {
-  cancelTalkRealtimeRelayOutput,
+  cancelTalkRealtimeRelayTurn,
   sendTalkRealtimeRelayAudio,
   stopTalkRealtimeRelaySession,
 } from "./talk-realtime-relay.js";
@@ -61,7 +61,6 @@ function createPluginTalkEventSink(
   let ptsMs = 0;
   let state: Extract<PluginTalkSessionEvent, { type: "state" }>["state"] = "idle";
   let closed = false;
-  let outputGeneration: number | undefined;
   let deliveryFailed = false;
   const deliveryQueue = new BoundedSerialQueue({
     maxPendingCount: MAX_PENDING_PLUGIN_TALK_EVENTS,
@@ -108,22 +107,16 @@ function createPluginTalkEventSink(
     get closed() {
       return closed;
     },
-    get outputGeneration() {
-      return outputGeneration;
-    },
     eventSink(event: TalkRealtimeRelayEvent): void {
       switch (event.type) {
         case "ready":
         case "inputAudio":
+          setState("listening");
+          return;
         case "audioDone":
           setState("listening");
           return;
-        case "audioStarted":
-          outputGeneration = event.outputGeneration;
-          setState("speaking");
-          return;
         case "audio": {
-          outputGeneration = event.outputGeneration;
           setState("speaking");
           const pcm = Buffer.from(event.audioBase64, "base64");
           deliver({ type: "audio", generation, sequence, ptsMs, pcm });
@@ -279,14 +272,9 @@ export async function openPluginTalkSession(
       if (events.closed) {
         return;
       }
-      const outputGeneration = events.outputGeneration;
-      if (outputGeneration === undefined) {
-        return;
-      }
-      cancelTalkRealtimeRelayOutput({
+      cancelTalkRealtimeRelayTurn({
         relaySessionId,
         connId: ownerId,
-        outputGeneration,
         reason: reason?.trim() || "plugin-cancelled",
       });
     },

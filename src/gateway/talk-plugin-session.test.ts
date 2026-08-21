@@ -18,7 +18,7 @@ vi.mock("./server-plugin-in-process-dispatch.js", () => ({
 }));
 vi.mock("./talk-realtime-relay.js", () => ({
   sendTalkRealtimeRelayAudio: mocks.sendAudio,
-  cancelTalkRealtimeRelayOutput: mocks.cancelOutput,
+  cancelTalkRealtimeRelayTurn: mocks.cancelOutput,
   stopTalkRealtimeRelaySession: mocks.stopSession,
 }));
 
@@ -93,15 +93,11 @@ describe("plugin Talk session", () => {
     createParams.eventSink({ relaySessionId: "relay-1", type: "ready" });
     createParams.eventSink({
       relaySessionId: "relay-1",
-      type: "audioStarted",
-      outputGeneration: 1,
-    });
-    createParams.eventSink({
-      relaySessionId: "relay-1",
       type: "audio",
       audioBase64: Buffer.from([1, 0]).toString("base64"),
-      outputGeneration: 1,
     });
+    createParams.eventSink({ relaySessionId: "relay-1", type: "audioDone" });
+    session.cancelOutput("barge-in");
     createParams.eventSink({ relaySessionId: "relay-1", type: "clear", reason: "barge-in" });
 
     await vi.waitFor(() => expect(onEvent).toHaveBeenCalledTimes(5));
@@ -115,12 +111,11 @@ describe("plugin Talk session", () => {
         ptsMs: 0,
         pcm: Buffer.from([1, 0]),
       },
+      { type: "state", generation: 0, ptsMs: 1 / 24, state: "listening" },
       { type: "clear", generation: 1, reason: "barge-in" },
-      { type: "state", generation: 1, ptsMs: 0, state: "listening" },
     ]);
 
     session.sendAudio(new Uint8Array([2, 0]), { timestamp: 20 });
-    session.cancelOutput("barge-in");
     session.close();
 
     expect(mocks.sendAudio).toHaveBeenCalledWith({
@@ -132,7 +127,6 @@ describe("plugin Talk session", () => {
     expect(mocks.cancelOutput).toHaveBeenCalledWith({
       relaySessionId: "relay-1",
       connId: createParams.ownerId,
-      outputGeneration: 1,
       reason: "barge-in",
     });
     expect(mocks.stopSession).toHaveBeenCalledWith({
@@ -250,7 +244,7 @@ describe("plugin Talk session", () => {
     const eventSink = capturedDispatchContext().eventSink;
 
     eventSink({ relaySessionId: "relay-1", type: "ready" });
-    eventSink({ relaySessionId: "relay-1", type: "audioStarted", outputGeneration: 1 });
+    eventSink({ relaySessionId: "relay-1", type: "audio", audioBase64: "" });
 
     expect(deliveries).toEqual(["start:listening"]);
     firstDelivery.resolve();

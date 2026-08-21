@@ -5,10 +5,7 @@ import {
 
 export const PLUGIN_TALK_AUDIO_FORMAT: Readonly<
   Extract<RealtimeVoiceAudioFormat, { encoding: "pcm16" }>
-> = REALTIME_VOICE_AUDIO_FORMAT_PCM16_24KHZ as Extract<
-  RealtimeVoiceAudioFormat,
-  { encoding: "pcm16" }
->;
+> = REALTIME_VOICE_AUDIO_FORMAT_PCM16_24KHZ;
 
 export type PluginTalkSessionEvent =
   | {

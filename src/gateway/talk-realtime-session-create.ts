@@ -16,6 +16,7 @@ import {
   resolveTalkRealtimeProviderInstructions,
 } from "./server-methods/talk-shared.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
+import type { TalkAgentConsultAuthority } from "./talk-client-gateway-control.js";
 import type { TalkRealtimeRelayEventSink } from "./talk-realtime-relay-state.js";
 import { createTalkRealtimeRelaySession } from "./talk-realtime-relay.js";
 import { rememberUnifiedTalkSession } from "./talk-session-registry.js";
@@ -65,6 +66,7 @@ export async function createGatewayRealtimeTalkSession(params: {
   context: GatewayRequestContext;
   ownerId: string;
   agentId?: string;
+  consultAuthority: TalkAgentConsultAuthority;
   quotaOwnerId?: string;
   request: RealtimeTalkSessionRequest;
   eventSink?: TalkRealtimeRelayEventSink;
@@ -113,6 +115,7 @@ export async function createGatewayRealtimeTalkSession(params: {
     ...(params.quotaOwnerId ? { quotaOwnerId: params.quotaOwnerId } : {}),
     ...(params.eventSink ? { eventSink: params.eventSink } : {}),
     cfg: runtimeConfig,
+    consultAuthority: params.consultAuthority,
     provider: resolution.provider,
     providerConfig: relayLaunch.providerConfig,
     instructions: buildRealtimeInstructions(realtimeContext.instructions),

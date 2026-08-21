@@ -253,6 +253,7 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
             context,
             ownerId: pluginDispatch?.ownerId ?? connId,
             agentId,
+            consultAuthority: resolveTalkAgentConsultAuthority(client?.connect?.scopes),
             ...(pluginDispatch
               ? {
                   quotaOwnerId: pluginDispatch.quotaOwnerId,

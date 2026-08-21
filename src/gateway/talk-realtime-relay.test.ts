@@ -25,7 +25,6 @@ import type {
 import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
 import { createChatRunState } from "./server-chat-state.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
-import { closeTalkRealtimeRelaySessionsForConnection } from "./talk-realtime-relay-operations.js";
 import {
   RELAY_SESSION_TTL_MS,
   drainingRelaySessions,
