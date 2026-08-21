@@ -62,6 +62,7 @@ function createPluginTalkEventSink(
   let state: Extract<PluginTalkSessionEvent, { type: "state" }>["state"] = "idle";
   let closed = false;
   let deliveryFailed = false;
+  let terminalDeliveryAfterOverflow = false;
   const deliveryQueue = new BoundedSerialQueue({
     maxPendingCount: MAX_PENDING_PLUGIN_TALK_EVENTS,
     maxPendingWeight: MAX_PENDING_PLUGIN_TALK_EVENTS,
@@ -90,6 +91,7 @@ function createPluginTalkEventSink(
       }
     });
     if (!admission.accepted) {
+      terminalDeliveryAfterOverflow = true;
       failDelivery(new Error("Plugin Talk event delivery could not keep up with realtime audio"));
       return;
     }
@@ -151,7 +153,22 @@ function createPluginTalkEventSink(
             return;
           }
           closed = true;
-          deliver({ type: "closed", generation, reason: event.reason });
+          if (terminalDeliveryAfterOverflow) {
+            const terminalEvent: PluginTalkSessionEvent = {
+              type: "closed",
+              generation,
+              reason: event.reason,
+            };
+            // Overflow seals normal admission, but the terminal callback is the
+            // plugin's cleanup contract. Drain the accepted prefix, then bypass
+            // the sealed queue exactly once so the renderer cannot be orphaned.
+            void deliveryQueue
+              .flush()
+              .then(() => params.onEvent(terminalEvent))
+              .catch(onDeliveryError);
+          } else {
+            deliver({ type: "closed", generation, reason: event.reason });
+          }
           break;
         case "mark":
         case "toolCallCancelled":

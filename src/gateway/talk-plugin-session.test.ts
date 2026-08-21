@@ -258,6 +258,33 @@ describe("plugin Talk session", () => {
     );
   });
 
+  it("delivers the terminal close event after callback queue overflow", async () => {
+    const firstDelivery = createDeferred();
+    const deliveries: string[] = [];
+    await openPluginTalkSession({
+      sessionKey: "agent:main:avatar",
+      signal: controller.signal,
+      onEvent: async (event) => {
+        deliveries.push(event.type);
+        if (deliveries.length === 1) {
+          await firstDelivery.promise;
+        }
+      },
+    });
+    const eventSink = capturedDispatchContext().eventSink;
+
+    eventSink({ relaySessionId: "relay-1", type: "ready" });
+    for (let index = 0; index < 129; index += 1) {
+      eventSink({ relaySessionId: "relay-1", type: "audio", audioBase64: "" });
+    }
+
+    await vi.waitFor(() => expect(mocks.stopSession).toHaveBeenCalledOnce());
+    eventSink({ relaySessionId: "relay-1", type: "close", reason: "error" });
+    firstDelivery.resolve();
+
+    await vi.waitFor(() => expect(deliveries).toEqual(["state", "closed"]));
+  });
+
   it("rejects plugin routes without Talk access", async () => {
     mocks.scope.mockReturnValue({
       pluginId: "avatar",
