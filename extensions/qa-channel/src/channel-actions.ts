@@ -145,7 +145,12 @@ export const qaChannelMessageActions: ChannelMessageActionAdapter = {
     if (action === "threadReply") {
       const channelId = typeof args.channelId === "string" ? args.channelId.trim() : "";
       const threadId = typeof args.threadId === "string" ? args.threadId.trim() : "";
-      return channelId && threadId ? { to: `thread:${channelId}/${threadId}` } : null;
+      return channelId && threadId
+        ? {
+            to: buildQaTarget({ chatType: "channel", conversationId: channelId }),
+            threadId,
+          }
+        : null;
     }
     return null;
   },
