@@ -182,12 +182,12 @@ describe("qa-channel plugin", () => {
       target: "thread:qa-room/thread-1",
     });
 
-    expect(route?.sessionKey).toBe("agent:main:qa-channel:channel:thread:qa-room/thread-1");
-    expect(route?.baseSessionKey).toBe("agent:main:qa-channel:channel:thread:qa-room/thread-1");
-    expect(route?.threadId).toBeUndefined();
+    expect(route?.sessionKey).toBe("agent:main:qa-channel:channel:channel:qa-room:thread:thread-1");
+    expect(route?.baseSessionKey).toBe("agent:main:qa-channel:channel:channel:qa-room");
+    expect(route?.threadId).toBe("thread-1");
   });
 
-  it("does not append routing metadata to explicit thread targets", async () => {
+  it("does not duplicate routing metadata on explicit thread targets", async () => {
     const route = await qaChannelPlugin.messaging?.resolveOutboundSessionRoute?.({
       cfg: {},
       agentId: "main",
@@ -198,9 +198,9 @@ describe("qa-channel plugin", () => {
       currentSessionKey: "agent:main:qa-channel:channel:thread:qa-room/thread-1:thread:stale",
     });
 
-    expect(route?.sessionKey).toBe("agent:main:qa-channel:channel:thread:qa-room/thread-1");
-    expect(route?.baseSessionKey).toBe("agent:main:qa-channel:channel:thread:qa-room/thread-1");
-    expect(route?.threadId).toBeUndefined();
+    expect(route?.sessionKey).toBe("agent:main:qa-channel:channel:channel:qa-room:thread:thread-1");
+    expect(route?.baseSessionKey).toBe("agent:main:qa-channel:channel:channel:qa-room");
+    expect(route?.threadId).toBe("thread-1");
   });
 
   it("rejects conflicting explicit thread routing metadata", () => {
