@@ -597,6 +597,30 @@ describe("openrouter provider hooks", () => {
     expect(contribution?.dynamicSuffix).not.toContain("google/gemini-3.5-flash");
   });
 
+  it("omits Fusion prompt details when a narrower scope disables extra body", async () => {
+    const provider = await registerSingleProviderPlugin(openrouterPlugin);
+    const contribution = provider.resolveSystemPromptContribution?.({
+      provider: "openrouter",
+      modelId: "openrouter/fusion",
+      promptMode: "full",
+      agentId: "analyst",
+      config: {
+        agents: {
+          defaults: {
+            params: {
+              extra_body: {
+                plugins: [{ id: "fusion", analysis_models: ["default/model"] }],
+              },
+            },
+          },
+          entries: { analyst: { params: { extraBody: null } } },
+        },
+      },
+    } as never);
+
+    expect(contribution).toBeUndefined();
+  });
+
   it("reads per-agent Fusion config from the canonical agent roster", async () => {
     const provider = await registerSingleProviderPlugin(openrouterPlugin);
     const contribution = provider.resolveSystemPromptContribution?.({

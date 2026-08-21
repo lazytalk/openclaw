@@ -26,4 +26,27 @@ describe("resolveInitialThinkLevel", () => {
       }),
     ).toBe("ultra");
   });
+
+  it("uses the selected agent model thinking default", () => {
+    expect(
+      resolveInitialThinkLevel({
+        config: {
+          agents: {
+            defaults: {
+              models: { "openai/gpt-5.5": { params: { thinking: "low" } } },
+            },
+            entries: {
+              audit: {
+                models: { "openai/gpt-5.5": { params: { thinking: "high" } } },
+              },
+            },
+          },
+        },
+        provider: "openai",
+        modelId: "gpt-5.5",
+        model: { reasoning: true },
+        agentId: "audit",
+      }),
+    ).toBe("high");
+  });
 });

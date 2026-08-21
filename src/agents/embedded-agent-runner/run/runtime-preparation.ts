@@ -220,6 +220,7 @@ export async function prepareEmbeddedRunRuntime(input: {
     provider,
     modelId,
     model: effectiveModel,
+    agentId: params.agentId,
   });
   const initialThinkLevel = modelSelectionChangedByHook
     ? (resolveCandidateThinkingLevel({

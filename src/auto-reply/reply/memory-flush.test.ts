@@ -305,4 +305,33 @@ describe("Anthropic server compaction host threshold", () => {
       }),
     ).toBe(expected);
   });
+
+  it("uses the selected agent context window for the fallback threshold", () => {
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          params: { anthropicServerCompaction: true },
+          models: {
+            "anthropic/claude-opus-4-7": { params: { context1m: false } },
+          },
+        },
+        entries: {
+          audit: {
+            models: {
+              "anthropic/claude-opus-4-7": { params: { context1m: true } },
+            },
+          },
+        },
+      },
+    };
+
+    expect(
+      resolveResponsesServerCompactionThreshold({
+        cfg,
+        provider: "anthropic",
+        modelId: "claude-opus-4-7",
+        agentId: "audit",
+      }),
+    ).toBe(700_000);
+  });
 });
