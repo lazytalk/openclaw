@@ -220,6 +220,7 @@ async function resolveTelegramThinkMenuCurrentLevel(params: {
     provider: params.provider ?? defaultModel.provider,
     model: params.model ?? defaultModel.model,
     agentRuntime: params.agentRuntime,
+    agentId: params.agentId,
     loadRuntimeCatalog: async () => params.catalog,
   });
 }
