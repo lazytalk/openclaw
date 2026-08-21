@@ -751,6 +751,7 @@ export function buildStatusMessageParts(args: StatusArgs): StatusMessageParts {
     cfg: contextConfig,
     provider: selectedLookupProvider,
     model: selectedLookupModel,
+    agentId: args.agentId,
     allowAsyncLoad: false,
   });
   const explicitRuntimeContextTokens =
@@ -761,6 +762,7 @@ export function buildStatusMessageParts(args: StatusArgs): StatusMessageParts {
     cfg: contextConfig,
     ...(contextLookupProvider ? { provider: contextLookupProvider } : {}),
     model: contextLookupModel,
+    agentId: args.agentId,
     allowAsyncLoad: false,
   });
   const activeContextTokens =

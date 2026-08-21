@@ -132,11 +132,13 @@ function resolveStatusRuntimeContextTokens(params: {
   cfg: OpenClawConfig;
   provider: string;
   model: string;
+  agentId?: string;
 }): number | undefined {
   return resolveContextTokensForModel({
     cfg: params.cfg,
     provider: params.provider,
     model: params.model,
+    agentId: params.agentId,
     allowAsyncLoad: false,
   });
 }
@@ -601,6 +603,7 @@ export async function buildStatusReplyParts(
     cfg,
     provider: activeStatusProvider,
     model: modelRefs.active.model || model,
+    agentId: statusAgentId,
   });
   const statusRuntimeContextTokens = activeRuntimeIsAuthoritative
     ? (runtimeContextTokens ??

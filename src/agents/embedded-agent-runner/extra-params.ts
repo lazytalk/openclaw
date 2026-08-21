@@ -126,6 +126,11 @@ export function resolveExtraParams(params: {
   });
 
   const merged = Object.assign({}, ...paramSources);
+  const resolvedExtraBody = resolveAliasedParamValue(paramSources, "extra_body", "extraBody");
+  if (resolvedExtraBody !== undefined) {
+    merged.extra_body = resolvedExtraBody;
+    delete merged.extraBody;
+  }
   const resolvedParallelToolCalls = resolveAliasedParamValue(
     paramSources,
     "parallel_tool_calls",

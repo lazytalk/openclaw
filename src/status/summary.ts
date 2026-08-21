@@ -458,6 +458,7 @@ export async function getStatusSummary(
           cfg,
           provider: lookupModel.provider,
           model: lookupModelId,
+          agentId,
           ...modelContext,
           fallbackContextTokens: configContextTokens ?? undefined,
           allowAsyncLoad: false,
