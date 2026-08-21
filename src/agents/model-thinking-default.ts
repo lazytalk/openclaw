@@ -65,5 +65,6 @@ export async function resolveThinkingDefaultWithRuntimeCatalog(params: {
     model: params.model,
     catalog,
     agentRuntime: params.agentRuntime,
+    agentId: params.agentId,
   });
 }

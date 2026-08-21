@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { resolveThinkingDefaultWithRuntimeCatalog } from "../../model-thinking-default.js";
 import {
   resolveInitialThinkLevel,
   resolveRequestStreamTransportOverrides,
@@ -48,5 +49,32 @@ describe("resolveInitialThinkLevel", () => {
         agentId: "audit",
       }),
     ).toBe("high");
+  });
+});
+
+describe("resolveThinkingDefaultWithRuntimeCatalog", () => {
+  it("preserves agent scope through the runtime-catalog lookup", async () => {
+    await expect(
+      resolveThinkingDefaultWithRuntimeCatalog({
+        cfg: {
+          agents: {
+            defaults: {
+              models: { "openai/gpt-5.5": { params: { thinking: "low" } } },
+            },
+            entries: {
+              audit: {
+                models: { "openai/gpt-5.5": { params: { thinking: "high" } } },
+              },
+            },
+          },
+        },
+        provider: "openai",
+        model: "gpt-5.5",
+        agentId: "audit",
+        loadRuntimeCatalog: async () => [
+          { provider: "openai", id: "gpt-5.5", name: "gpt-5.5", reasoning: true },
+        ],
+      }),
+    ).resolves.toBe("high");
   });
 });
