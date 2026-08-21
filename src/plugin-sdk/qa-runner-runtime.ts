@@ -154,7 +154,7 @@ type QaRunnerTransportAdapterDefinition = {
     timeoutMs?: number;
     pollIntervalMs?: number;
   }) => Promise<void>;
-  buildAgentDelivery: (params: { target: string }) => {
+  buildAgentDelivery: (params: { target: string; threadId?: string }) => {
     channel: string;
     to?: string;
     replyChannel: string;
