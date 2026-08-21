@@ -522,6 +522,7 @@ export async function applyInlineDirectiveOverrides(params: {
       config: cfg,
     }),
     model,
+    agentId: resolveSessionAgentId({ sessionKey, config: cfg }),
     modelContextWindow: selectedCatalogEntry?.contextWindow,
     modelContextTokens: selectedCatalogEntry?.contextTokens,
   });

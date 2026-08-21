@@ -18,12 +18,14 @@ export function resolveMemoryFlushContextWindowTokens(params: {
   modelId?: string;
   cfg?: OpenClawConfig;
   provider?: string;
+  agentId?: string;
 }): number {
   return (
     resolveContextTokensForModel({
       cfg: params.cfg,
       provider: params.provider,
       model: params.modelId,
+      agentId: params.agentId,
       allowAsyncLoad: false,
     }) ?? DEFAULT_CONTEXT_TOKENS
   );

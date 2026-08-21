@@ -781,6 +781,7 @@ export async function runPreflightCompactionIfNeeded(params: {
       runtimePolicySessionKey: params.runtimePolicySessionKey,
     }),
     modelId: params.followupRun.run.model ?? params.defaultModel,
+    agentId: compactionAgentId,
   });
   const memoryFlushPlan = resolveMemoryFlushPlan({ cfg: params.cfg });
   const reserveTokensFloor = memoryFlushPlan?.reserveTokensFloor ?? 20_000;
@@ -1160,6 +1161,7 @@ export async function runMemoryFlushIfNeeded(params: {
       runtimePolicySessionKey: params.runtimePolicySessionKey,
     }),
     modelId: params.followupRun.run.model ?? params.defaultModel,
+    agentId: params.followupRun.run.agentId,
   });
 
   const promptTokenEstimate = estimatePromptTokensForMemoryFlush(

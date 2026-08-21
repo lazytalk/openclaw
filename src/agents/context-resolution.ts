@@ -11,7 +11,7 @@ import {
   minPositiveContextTokens,
   providerContextTokenCacheKey,
 } from "./context-cache.js";
-import { resolveModelExtraParamSources } from "./model-extra-params.js";
+import { resolveModelExtraParamValue } from "./model-extra-params.js";
 import { normalizeProviderId } from "./model-selection.js";
 
 type ConfigModelEntry = { id?: string; contextWindow?: number; contextTokens?: number };
@@ -27,6 +27,7 @@ export type ContextTokenResolutionParams = {
   provider?: string;
   modelProvider?: string;
   model?: string;
+  agentId?: string;
   fallbackContextTokens?: number;
   modelContextWindow?: number;
   modelContextTokens?: number;
@@ -211,15 +212,15 @@ export function resolveContextTokensForModelFromCache(
       params.modelProvider,
       ref.model,
     );
-    const extraParamSources = resolveModelExtraParamSources({
-      config: params.cfg,
-      provider: ref.provider,
-      modelId: ref.model,
-    });
-    const effectiveContext1M =
-      extraParamSources.modelParams && Object.hasOwn(extraParamSources.modelParams, "context1m")
-        ? extraParamSources.modelParams.context1m
-        : extraParamSources.defaultParams?.context1m;
+    const effectiveContext1M = resolveModelExtraParamValue(
+      {
+        config: params.cfg,
+        provider: ref.provider,
+        modelId: ref.model,
+        agentId: params.agentId,
+      },
+      "context1m",
+    );
     const fixedContextWindow = resolveAnthropicFixedContextWindow(ref.provider, ref.model, {
       claudeCli1M: effectiveContext1M === true,
     });

@@ -236,6 +236,7 @@ export async function accountAgentTurn(context: AgentTurnAccountingContext) {
           cfg,
           provider: providerUsed,
           model: modelUsed,
+          agentId: followupRun.run.agentId,
           allowAsyncLoad: false,
         })
       : undefined;

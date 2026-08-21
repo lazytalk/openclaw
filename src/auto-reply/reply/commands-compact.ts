@@ -130,6 +130,7 @@ function resolveManualCompactContextTokenBudget(params: {
       contextConfigProvider,
       model,
     }),
+    agentId: params.agentId,
     allowAsyncLoad: false,
   });
   if (typeof configuredContextTokens === "number" && configuredContextTokens > 0) {
