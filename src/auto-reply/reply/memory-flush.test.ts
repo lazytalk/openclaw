@@ -69,6 +69,34 @@ function buildHostConfig(params: {
 }
 
 describe("Responses server compaction host/transport parity", () => {
+  it("uses the active agent-model compaction threshold", () => {
+    const modelRef = modelKey("openai", TEST_MODEL_ID);
+    const cfg: OpenClawConfig = {
+      agents: {
+        defaults: {
+          params: { responsesCompactThreshold: 120_000 },
+        },
+        entries: [
+          {
+            id: "audit",
+            models: {
+              [modelRef]: { params: { responsesCompactThreshold: 175_000 } },
+            },
+          },
+        ],
+      },
+    };
+
+    expect(
+      resolveResponsesServerCompactionThreshold({
+        cfg,
+        provider: "openai",
+        modelId: TEST_MODEL_ID,
+        agentId: "audit",
+      }),
+    ).toBe(175_000);
+  });
+
   it.each([
     {
       name: "OpenAI default route without an authored base URL",

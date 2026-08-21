@@ -149,27 +149,26 @@ function findConfiguredOpenRouterModelParams(
   return undefined;
 }
 
-function resolveMergedOpenRouterPromptParams(
+function resolveFusionExtraBody(
   ctx: OpenRouterFusionPromptContext,
 ): Record<string, unknown> | undefined {
   const agentConfig =
     ctx.agentId && ctx.config ? resolveAgentConfig(ctx.config, ctx.agentId) : undefined;
-  const merged = {
-    ...readRecord(ctx.config?.agents?.defaults?.params),
-    ...findConfiguredOpenRouterModelParams(ctx.config?.agents?.defaults?.models, ctx.modelId),
-    ...readRecord(agentConfig?.params),
-    ...findConfiguredOpenRouterModelParams(agentConfig?.models, ctx.modelId),
-  };
-  return Object.keys(merged).length > 0 ? merged : undefined;
-}
-
-function resolveFusionExtraBody(
-  ctx: OpenRouterFusionPromptContext,
-): Record<string, unknown> | undefined {
-  const params = resolveMergedOpenRouterPromptParams(ctx);
-  const rawExtraBody =
-    params && Object.hasOwn(params, "extra_body") ? params.extra_body : params?.extraBody;
-  return readRecord(rawExtraBody);
+  const sources = [
+    readRecord(ctx.config?.agents?.defaults?.params),
+    findConfiguredOpenRouterModelParams(ctx.config?.agents?.defaults?.models, ctx.modelId),
+    readRecord(agentConfig?.params),
+    findConfiguredOpenRouterModelParams(agentConfig?.models, ctx.modelId),
+  ];
+  let effective: Record<string, unknown> | undefined;
+  for (const source of sources) {
+    const raw = source && Object.hasOwn(source, "extra_body") ? source.extra_body : source?.extraBody;
+    const candidate = readRecord(raw);
+    if (candidate) {
+      effective = candidate;
+    }
+  }
+  return effective;
 }
 
 function resolveOpenRouterFusionPromptContribution(

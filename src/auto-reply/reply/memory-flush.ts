@@ -46,6 +46,7 @@ export function resolveResponsesServerCompactionThreshold(params: {
   cfg?: OpenClawConfig;
   provider?: string;
   modelId?: string;
+  agentId?: string;
 }): number | undefined {
   const provider = params.provider?.trim();
   const modelId = params.modelId?.trim();
@@ -60,12 +61,13 @@ export function resolveResponsesServerCompactionThreshold(params: {
     models: providerConfig?.models,
     normalizeModelId,
   }).get(normalizeModelId(modelId));
-  const { defaultParams, modelParams } = resolveModelExtraParamSources({
+  const { paramSources } = resolveModelExtraParamSources({
     config: params.cfg,
     provider,
     modelId,
+    agentId: params.agentId,
   });
-  const extraParams = { ...defaultParams, ...modelParams };
+  const extraParams = Object.assign({}, ...paramSources);
   if (normalizedProvider === "anthropic") {
     return resolveAnthropicServerCompactionPlan(
       {

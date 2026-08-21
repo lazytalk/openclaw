@@ -793,6 +793,7 @@ export async function runPreflightCompactionIfNeeded(params: {
     cfg: params.cfg,
     provider: params.followupRun.run.provider,
     modelId: params.followupRun.run.model ?? params.defaultModel,
+    agentId: compactionAgentId,
   });
   const threshold = Math.max(
     contextWindowTokens - reserveTokensFloor - softThresholdTokens,

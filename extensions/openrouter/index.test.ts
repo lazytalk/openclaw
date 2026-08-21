@@ -593,8 +593,8 @@ describe("openrouter provider hooks", () => {
       },
     } as never);
 
-    expect(contribution?.dynamicSuffix).toContain("Analysis models: google/gemini-3.5-flash.");
-    expect(contribution?.dynamicSuffix).not.toContain("deepseek/deepseek-v4-pro");
+    expect(contribution?.dynamicSuffix).toContain("Analysis models: deepseek/deepseek-v4-pro.");
+    expect(contribution?.dynamicSuffix).not.toContain("google/gemini-3.5-flash");
   });
 
   it("reads per-agent Fusion config from the canonical agent roster", async () => {
