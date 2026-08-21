@@ -93,7 +93,8 @@ describe("createQaSelfCheckScenario", () => {
       if (action === "thread-create") {
         return {
           details: {
-            target: "thread:qa-room/thread-1",
+            target: "channel:qa-room",
+            threadId: "thread-1",
             thread: { id: "thread-1" },
           },
         };
@@ -120,11 +121,7 @@ describe("createQaSelfCheckScenario", () => {
     await threadStep.run({ state: testState, performAction });
     await lifecycleStep.run({ state: testState, performAction });
 
-    expect(targets).toEqual([
-      "thread:qa-room/thread-1",
-      "thread:qa-room/thread-1",
-      "thread:qa-room/thread-1",
-    ]);
+    expect(targets).toEqual(["channel:qa-room", "channel:qa-room", "channel:qa-room"]);
     const deletedMessage = state.getSnapshot().messages.find((message) => message.deleted);
     if (!deletedMessage) {
       throw new Error("self-check did not preserve its deleted message tombstone");

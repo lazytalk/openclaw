@@ -214,7 +214,11 @@ export const qaChannelMessageActions: ChannelMessageActionAdapter = {
         });
         return jsonResult({
           thread,
-          target: `thread:${target.conversationId}/${thread.id}`,
+          target: buildQaTarget({
+            chatType: target.conversationKind,
+            conversationId: target.conversationId,
+          }),
+          threadId: thread.id,
         });
       }
       case "thread-reply": {
