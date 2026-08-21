@@ -162,7 +162,8 @@ function resolveFusionExtraBody(
   ];
   let effective: Record<string, unknown> | undefined;
   for (const source of sources) {
-    const raw = source && Object.hasOwn(source, "extra_body") ? source.extra_body : source?.extraBody;
+    const raw =
+      source && Object.hasOwn(source, "extra_body") ? source.extra_body : source?.extraBody;
     const candidate = readRecord(raw);
     if (candidate) {
       effective = candidate;

@@ -73,6 +73,7 @@ function resolveOpenRouterProviderConfigParams(
   for (const [, config] of prioritizedProviders) {
     const params = readRecord(config.params);
     if (params) {
+      // SAFETY: both inputs are sanitized plain records, so the recursive merge remains a record.
       matchedParams = mergeDeep(matchedParams ?? {}, params) as Record<string, unknown>;
     }
   }

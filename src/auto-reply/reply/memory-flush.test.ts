@@ -76,14 +76,13 @@ describe("Responses server compaction host/transport parity", () => {
         defaults: {
           params: { responsesCompactThreshold: 120_000 },
         },
-        entries: [
-          {
-            id: "audit",
+        entries: {
+          audit: {
             models: {
               [modelRef]: { params: { responsesCompactThreshold: 175_000 } },
             },
           },
-        ],
+        },
       },
     };
 
