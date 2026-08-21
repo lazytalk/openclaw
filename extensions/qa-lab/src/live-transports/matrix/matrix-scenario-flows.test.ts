@@ -24,6 +24,26 @@ const MATRIX_ISOLATED_ALLOWBOTS_ADMISSION_SCENARIOS = [
   "matrix-allowbots-true-unmentioned-open-room",
 ] as const;
 
+const MATRIX_NO_REPLY_SCENARIOS = [
+  "matrix-allowbots-default-block",
+  "matrix-allowbots-mentions-unmentioned-open-room-block",
+  "matrix-allowbots-room-override-blocks-account-true",
+  "matrix-allowbots-self-sender-ignored",
+  "matrix-attachment-only-ignored",
+  "matrix-inbound-edit-ignored",
+  "matrix-mention-metadata-spoof-block",
+  "matrix-mxid-prefixed-command-block",
+  "matrix-reaction-not-a-reply",
+] as const;
+
+const MATRIX_NO_REPLY_WINDOW_MS = 8_000;
+
+const MATRIX_PROVIDER_DEADLINE_SCENARIOS = new Set([
+  "matrix-e2ee-thread-follow-up",
+  "matrix-inbound-edit-no-duplicate-trigger",
+  "matrix-thread-nested-reply-shape",
+]);
+
 function readModuleBinding(
   scenario: ReturnType<typeof readQaBootstrapScenarioCatalog>["scenarios"][number],
 ) {
@@ -93,7 +113,9 @@ describe("Matrix QA Lab scenario flows", () => {
       }
       expect(scenario.execution.channel, scenario.id).toBe("matrix");
       expect(scenario.execution.retryCount, scenario.id).toBe(0);
-      expect(scenario.execution.timeoutMs, scenario.id).toBeGreaterThan(0);
+      if (!MATRIX_PROVIDER_DEADLINE_SCENARIOS.has(scenario.id)) {
+        expect(scenario.execution.timeoutMs, scenario.id).toBeGreaterThan(0);
+      }
       expect(scenario.execution.flow?.steps.at(-1)?.detailsExpr, scenario.id).toBe(
         "result.details ?? (result.artifacts ? JSON.stringify(result.artifacts, null, 2) : undefined)",
       );
@@ -115,6 +137,20 @@ describe("Matrix QA Lab scenario flows", () => {
         canaryScenarioIds.has(scenario.id),
       );
       expect(readModuleBinding(scenario).callAction.args).toEqual([{ expr: "scenarioContext" }]);
+    }
+  });
+
+  it("reserves flow cleanup time after the no-reply observation window", () => {
+    for (const scenarioId of MATRIX_NO_REPLY_SCENARIOS) {
+      const execution = requireFlowScenario(readQaScenarioById(scenarioId)).execution;
+      expect(execution.timeoutMs, scenarioId).toBeGreaterThan(MATRIX_NO_REPLY_WINDOW_MS);
+    }
+  });
+
+  it("uses provider-owned deadlines for model-driven multi-phase Matrix flows", () => {
+    for (const scenarioId of MATRIX_PROVIDER_DEADLINE_SCENARIOS) {
+      const execution = requireFlowScenario(readQaScenarioById(scenarioId)).execution;
+      expect(execution.timeoutMs, scenarioId).toBeUndefined();
     }
   });
 
