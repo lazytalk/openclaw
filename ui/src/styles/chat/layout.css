@@ -1650,7 +1650,6 @@ openclaw-chat-video-player {
 .chat-audio-player__timeline {
   display: flex;
   align-items: center;
-  gap: 12px;
   min-width: 0;
   flex: 1;
 }
@@ -1732,6 +1731,7 @@ openclaw-chat-video-player {
 
 .chat-audio-player__time {
   display: block;
+  width: 62px;
   flex: none;
   color: var(--muted);
   font-size: 11px;
