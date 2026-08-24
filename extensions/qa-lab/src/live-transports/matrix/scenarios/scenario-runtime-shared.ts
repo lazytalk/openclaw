@@ -81,8 +81,6 @@ export type MatrixQaScenarioContext = {
 
 const NO_REPLY_WINDOW_MS = 8_000;
 const NO_REPLY_WINDOW_ENV = "OPENCLAW_QA_MATRIX_NO_REPLY_WINDOW_MS";
-// The outer deadline starts before Matrix preparation and must also cover cleanup.
-const NO_REPLY_DEADLINE_RESERVE_MS = 5_000;
 const MATRIX_QA_PREVIEW_LIMIT = 200;
 
 export function truncateMatrixQaPreview(value: string | null | undefined) {
@@ -96,8 +94,7 @@ export function resolveMatrixQaNoReplyWindowMs(timeoutMs: number) {
   const parsed =
     raw === undefined ? NO_REPLY_WINDOW_MS : /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
   const windowMs = Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : NO_REPLY_WINDOW_MS;
-  const availableWindowMs = Math.max(1, timeoutMs - NO_REPLY_DEADLINE_RESERVE_MS);
-  return Math.min(windowMs, availableWindowMs);
+  return Math.min(windowMs, timeoutMs);
 }
 
 export {

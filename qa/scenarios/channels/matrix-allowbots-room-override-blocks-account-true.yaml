@@ -8,7 +8,7 @@ scenario:
   execution:
     kind: flow
     channel: matrix
-    timeoutMs: 15000
+    timeoutMs: 8000
     retryCount: 0
     config:
       matrixConfigOverrides:
