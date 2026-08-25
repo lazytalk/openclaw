@@ -49,6 +49,7 @@ export function sessionRow(
     hasAutomation?: GatewaySessionRow["hasAutomation"];
     incognito?: GatewaySessionRow["incognito"];
     unread?: boolean;
+    markedUnreadAt?: number;
     status?: string;
     spawnedBy?: string;
     startedAt?: number;
