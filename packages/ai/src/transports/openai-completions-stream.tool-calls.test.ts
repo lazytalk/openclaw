@@ -303,26 +303,24 @@ describe("openai completions stream", () => {
         { apiKey: "test-key" } as never,
       );
 
-      let doneReason: string | undefined;
-      const doneMessage: { content?: Array<{ type?: string }> } = {};
+      let terminalError: { content?: Array<{ type?: string }>; errorMessage?: string } | undefined;
+      const eventTypes: string[] = [];
       for await (const event of stream as AsyncIterable<{
         type: string;
-        reason?: string;
-        message?: { content?: Array<{ type?: string }> };
+        error?: { content?: Array<{ type?: string }>; errorMessage?: string };
       }>) {
-        if (event.type === "done") {
-          doneReason = event.reason;
-          if (event.message) {
-            Object.assign(doneMessage, event.message);
-          }
+        eventTypes.push(event.type);
+        if (event.type === "error") {
+          terminalError = event.error;
         }
       }
 
-      // EOF without [DONE] → sawStreamDONE stays false → fail-closed
-      expect(doneReason).toBe("stop");
-      const toolCallBlocks =
-        doneMessage.content?.filter((block) => block.type === "toolCall") ?? [];
-      expect(toolCallBlocks).toStrictEqual([]);
+      expect(terminalError?.errorMessage).toContain("without a completion terminal");
+      expect(terminalError?.content?.filter((block) => block.type === "toolCall") ?? []).toEqual(
+        [],
+      );
+      expect(eventTypes).not.toContain("done");
+      expect(eventTypes).not.toContain("toolcall_end");
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));

@@ -177,6 +177,91 @@ describe("openai completions transport", () => {
     }
   });
 
+  it.each([
+    {
+      name: "rejects truncated text without a provider terminal",
+      delta: { content: "partial reply" },
+      finishReason: undefined,
+      doneMarker: false,
+      expectedTerminal: "error",
+    },
+    {
+      name: "rejects truncated tool calls before publishing completion",
+      delta: {
+        tool_calls: [
+          {
+            index: 0,
+            id: "call_partial",
+            type: "function" as const,
+            function: { name: "lookup", arguments: '{"query":"partial"}' },
+          },
+        ],
+      },
+      finishReason: undefined,
+      doneMarker: false,
+      expectedTerminal: "error",
+    },
+    {
+      name: "accepts a clean SSE terminal without finish_reason",
+      delta: { content: "complete reply" },
+      finishReason: undefined,
+      doneMarker: true,
+      expectedTerminal: "done",
+    },
+    {
+      name: "accepts an explicit finish_reason without an SSE terminal",
+      delta: { content: "complete reply" },
+      finishReason: "stop" as const,
+      doneMarker: false,
+      expectedTerminal: "done",
+    },
+  ])("$name over a real OpenAI-compatible HTTP stream", async (scenario) => {
+    const server = createServer((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.write(
+          `data: ${JSON.stringify(makeCompletionsChunk(scenario.delta, scenario.finishReason))}\n\n`,
+        );
+        if (scenario.doneMarker) {
+          response.write("data: [DONE]\n\n");
+        }
+        response.end();
+      });
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, "127.0.0.1", resolve);
+    });
+
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        throw new Error("Missing loopback server address");
+      }
+      const model = makeCompletionsModel({ baseUrl: `http://127.0.0.1:${address.port}/v1` });
+      const stream = createOpenAICompletionsTransportStreamFn()(
+        model,
+        { messages: [{ role: "user", content: "hello", timestamp: 1 }], tools: [] } as never,
+        { apiKey: "test-key" } as never,
+      );
+      const events: Array<{ type: string; error?: { errorMessage?: string } }> = [];
+      for await (const event of stream as AsyncIterable<(typeof events)[number]>) {
+        events.push(event);
+      }
+
+      expect(events.at(-1)?.type).toBe(scenario.expectedTerminal);
+      if (scenario.expectedTerminal === "error") {
+        expect(events.at(-1)?.error?.errorMessage).toContain("without a completion terminal");
+        expect(events.some((event) => event.type === "done")).toBe(false);
+        expect(events.some((event) => event.type === "toolcall_end")).toBe(false);
+      }
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("refuses ModelStudio chat streams with no user or assistant payload turns", async () => {
     const model = makeCompletionsModel({
       id: "qwen-coder-plus",

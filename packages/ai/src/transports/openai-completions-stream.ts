@@ -124,6 +124,7 @@ export async function processCompletionsStream(
   const toolCallBlockIndices = new WeakMap<ToolCallBlock, number>();
   let explicitVisibleTextBlocks: Set<TextBlock> | undefined;
   const normalizeToolCallDeltas = createOpenAICompletionsToolCallDeltaNormalizer();
+  let sawFinishReason = false;
   let sawStopFinishReason = false;
   let sawNativeToolCallDelta = false;
   const blockIndex = () => output.content.length - 1;
@@ -438,6 +439,7 @@ export async function processCompletionsStream(
       hasReasoningUsageActivity = hasOpenAICompletionsReasoningUsageActivity(choiceUsage);
     }
     if (choice.finish_reason) {
+      sawFinishReason = true;
       const finishReasonResult = mapOpenAIStopReason(choice.finish_reason, {
         allowSingularToolCall: true,
       });
@@ -566,6 +568,12 @@ export async function processCompletionsStream(
     flushPendingPostToolCallDeltas();
     emitReasoningUsageActivity(hasReasoningUsageActivity);
     await cooperativeScheduler.afterEvent();
+  }
+  throwIfModelStreamAborted(options?.signal);
+  if (options?.sawStreamDONE && !sawFinishReason && !options.sawStreamDONE()) {
+    throw new Error(
+      "OpenAI-compatible stream ended without a completion terminal (finish_reason or [DONE])",
+    );
   }
   flushReasoningTagTextPartitioner();
   flushDeepSeekToolCallRecovererAtEnd();
