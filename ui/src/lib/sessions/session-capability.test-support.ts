@@ -14,7 +14,11 @@ export function sessionsResult(
   };
 }
 
-export function createGatewayHarness(client: GatewayBrowserClient, featureMethods?: string[]) {
+export function createGatewayHarness(
+  client: GatewayBrowserClient,
+  featureMethods?: string[],
+  featureCapabilities?: string[],
+) {
   let snapshot: {
     client: GatewayBrowserClient | null;
     phase: "connected" | "reconnecting";
@@ -29,7 +33,9 @@ export function createGatewayHarness(client: GatewayBrowserClient, featureMethod
     hello:
       featureMethods === undefined
         ? null
-        : ({ features: { methods: featureMethods } } as GatewayHelloOk),
+        : ({
+            features: { methods: featureMethods, capabilities: featureCapabilities ?? [] },
+          } as GatewayHelloOk),
   };
   const listeners = new Set<(next: typeof snapshot) => void>();
   const eventListeners = new Set<(event: GatewayEventFrame) => void>();
