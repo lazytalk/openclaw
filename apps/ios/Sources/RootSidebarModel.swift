@@ -25,7 +25,6 @@ extension NodeAppModel {
         do {
             let response = try await self.makeChatTransport().listSessions(limit: limit, archived: archived)
             if !archived {
-                self.reconcileChatSessionReadState(response.sessions)
                 await self.storeCachedChatSessions(response.sessions)
             }
             return ChatSessionRosterSnapshot(sessions: response.sessions, isCached: false)
