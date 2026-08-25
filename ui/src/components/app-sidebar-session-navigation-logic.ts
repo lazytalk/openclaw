@@ -14,6 +14,7 @@ import {
   resolveSessionWorkSubtitle,
 } from "../lib/session-display.ts";
 import { isSessionRunActive } from "../lib/session-run-state.ts";
+import { collectKnownSessionGroups } from "../lib/sessions/grouping.ts";
 import {
   compareSessionRowsByUpdatedAt,
   filterVisibleSessionRows,
@@ -531,14 +532,9 @@ export function findSidebarMainSessionRow(
 
 export function collectKnownSidebarSessionGroups(
   catalog: readonly string[],
-  rows: readonly GatewaySessionRow[],
+  result: SessionsListResult | null,
 ): string[] {
-  const catalogSet = new Set(catalog);
-  const discovered = rows
-    .map((row) => normalizeOptionalString(row.category))
-    .filter((name): name is string => typeof name === "string" && !catalogSet.has(name))
-    .toSorted((a, b) => a.localeCompare(b));
-  return [...catalog, ...new Set(discovered)];
+  return collectKnownSessionGroups(catalog, result?.sessions ?? []);
 }
 
 /** Depth-first search across a projected session tree, including descendants.

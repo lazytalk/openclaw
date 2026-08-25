@@ -568,7 +568,7 @@ export class AppSidebarSessionNavigationElement extends AppSidebarBase {
   knownSessionGroups(): string[] {
     return collectKnownSidebarSessionGroups(
       this.context?.sessions.state.groups ?? [],
-      this.sessionData.sessionsResult?.sessions ?? [],
+      this.sessionData.sessionsResult,
     );
   }
 

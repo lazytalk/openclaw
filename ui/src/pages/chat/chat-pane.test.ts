@@ -9,7 +9,9 @@ import { t } from "../../i18n/index.ts";
 import { showToast } from "../../lib/toast.ts";
 import {
   installDialogPolyfill,
+  submitInputDialog,
   waitForConfirmDialogActions,
+  waitForInputDialog,
 } from "../../test-helpers/modal-dialog.ts";
 import { loadChatHistory } from "./chat-history.ts";
 import { ChatPaneBase } from "./chat-pane-base.ts";
@@ -126,6 +128,35 @@ describe("chat pane header state", () => {
     expect(onPaneSessionChange).toHaveBeenCalledWith("single", "agent:main:forked");
   });
 
+  it.each([
+    ["pin", { kind: "toggle-pin" } as const, { pinned: true }],
+    ["unread", { kind: "toggle-unread" } as const, { unread: true }],
+    ["icon", { kind: "set-icon", icon: "🦞" } as const, { icon: "🦞" }],
+    ["group", { kind: "move-to-group", category: "Projects" } as const, { category: "Projects" }],
+  ])("patches the active session from the header %s action", async (_name, action, expected) => {
+    const patch = vi.fn(async () => ({}));
+    const sessions = createSessionCapabilityFixture({
+      patch,
+      state: { error: null, groups: ["Projects"] },
+    });
+    const { pane } = createTestChatPane({ client: createGatewayBrowserClientFixture(), sessions });
+    const session = {
+      key: "agent:main:current",
+      sessionId: "session-current",
+      kind: "direct",
+      updatedAt: 0,
+      pinned: false,
+      unread: false,
+    } satisfies GatewaySessionRow;
+
+    await pane.handleHeaderSessionAction(action, session);
+
+    expect(patch).toHaveBeenCalledWith(session.key, expected, {
+      agentId: "main",
+      expectedSessionId: session.sessionId,
+    });
+  });
+
   it("aborts a stale header delete confirm and shows a retry notice when the connection is replaced while it is open", async () => {
     const restoreDialogPolyfill = installDialogPolyfill();
     try {
@@ -164,6 +195,56 @@ describe("chat pane header state", () => {
       expect(showToast).toHaveBeenCalledWith({
         message: t("sessionsView.deleteSessionStale", { session: "Current session" }),
       });
+    } finally {
+      document.body.replaceChildren();
+      restoreDialogPolyfill();
+    }
+  });
+
+  it("skips a no-ID header group move when the session leaves during the catalog write", async () => {
+    const restoreDialogPolyfill = installDialogPolyfill();
+    try {
+      let landCatalogWrite!: () => void;
+      const patch = vi.fn(async () => ({}));
+      const session = {
+        key: "agent:main:current",
+        kind: "direct",
+        updatedAt: 0,
+      } satisfies GatewaySessionRow;
+      const result = {
+        ts: 1,
+        count: 1,
+        path: "sessions.json",
+        defaults: { modelProvider: null, model: null, contextTokens: null },
+        sessions: [session],
+      };
+      const groupsPut = vi.fn(
+        () =>
+          new Promise<"completed">((resolve) => {
+            landCatalogWrite = () => resolve("completed");
+          }),
+      );
+      const sessions = createSessionCapabilityFixture({
+        groupsPut,
+        patch,
+        state: { error: null, groups: [], result },
+      });
+      const { pane } = createTestChatPane({
+        client: createGatewayBrowserClientFixture(),
+        sessions,
+      });
+
+      const pending = pane.handleHeaderSessionAction({ kind: "new-group" }, session);
+      await waitForInputDialog();
+      await submitInputDialog("Projects");
+      await vi.waitFor(() => expect(groupsPut).toHaveBeenCalledOnce());
+
+      result.sessions = [];
+      landCatalogWrite();
+      await pending;
+
+      expect(patch).not.toHaveBeenCalled();
+      expect(showToast).toHaveBeenCalledWith({ message: t("sessionsView.newGroupMoveSkipped") });
     } finally {
       document.body.replaceChildren();
       restoreDialogPolyfill();
