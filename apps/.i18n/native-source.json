@@ -44099,6 +44099,17 @@
       ]
     },
     {
+      "id": "native.apple.c0998dff769c3504",
+      "source": "Showing %lld of %lld sessions. Refresh to load the rest.",
+      "surface": "apple",
+      "sites": [
+        {
+          "kind": "ui-localized-call",
+          "path": "apps/ios/Sources/RootSidebarModel.swift"
+        }
+      ]
+    },
+    {
       "id": "native.apple.8b7ad79ccffd6b4e",
       "source": "Shows the full gateway status label",
       "surface": "apple",
@@ -44470,6 +44481,17 @@
         {
           "kind": "ui-localized-call",
           "path": "apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatWorkingProgress.swift"
+        }
+      ]
+    },
+    {
+      "id": "native.apple.7e25b2a702a07140",
+      "source": "Some sessions could not be loaded. Refresh to try again.",
+      "surface": "apple",
+      "sites": [
+        {
+          "kind": "ui-localized-call",
+          "path": "apps/ios/Sources/RootSidebarModel.swift"
         }
       ]
     },
