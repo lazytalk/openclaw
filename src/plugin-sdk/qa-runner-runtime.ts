@@ -159,6 +159,7 @@ type QaRunnerTransportAdapterDefinition = {
     to?: string;
     replyChannel: string;
     replyTo: string;
+    threadId?: string;
   };
   createRuntimeEnvPatch?: () => NodeJS.ProcessEnv;
   prepareFlow?: (

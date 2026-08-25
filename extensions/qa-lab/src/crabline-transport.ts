@@ -430,7 +430,10 @@ class QaCrablineTransport extends QaStateBackedTransportAdapter {
       logicalTarget.threadId,
     );
     this.#state.rememberProviderTarget(providerTargetKey, logicalTarget);
-    return delivery;
+    return {
+      ...delivery,
+      ...(logicalTarget.threadId ? { threadId: logicalTarget.threadId } : {}),
+    };
   };
 
   createRuntimeEnvPatch = () => this.#adapter.createProviderReadinessEnv({});

@@ -381,6 +381,7 @@ export abstract class QaStateBackedTransportAdapter implements QaTransportAdapte
     to?: string;
     replyChannel: string;
     replyTo: string;
+    threadId?: string;
   };
   abstract handleAction: (params: {
     action: QaTransportActionName;

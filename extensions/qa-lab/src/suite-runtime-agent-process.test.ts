@@ -517,6 +517,7 @@ describe("qa suite runtime agent process helpers", () => {
       channel: "qa-channel",
       replyChannel: "qa-channel",
       replyTo: "dm:qa-operator",
+      threadId: "provider-topic-42",
     }));
     const env = {
       gateway: { call: gatewayCall },
@@ -542,7 +543,7 @@ describe("qa suite runtime agent process helpers", () => {
         deliver: true,
         originatingChannel: "qa-channel",
         originatingTo: "dm:qa-operator",
-        originatingThreadId: "topic-42",
+        originatingThreadId: "provider-topic-42",
       },
       { timeoutMs: 30_000 },
     );

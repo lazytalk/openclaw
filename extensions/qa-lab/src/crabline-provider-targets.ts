@@ -6,18 +6,8 @@ import type {
 } from "@openclaw/crabline";
 import type { QaBusInboundMessageInput } from "./runtime-api.js";
 
-const TELEGRAM_QA_DRIVER_ID = "100001";
-const TELEGRAM_QA_OBSERVER_ID = "100002";
 const MATRIX_QA_SERVER_NAME = "matrix-qa.test";
 const MATRIX_QA_DRIVER_ID = `@driver:${MATRIX_QA_SERVER_NAME}`;
-
-export function resolveTelegramQaSenderId(senderId: string) {
-  return senderId === "driver"
-    ? TELEGRAM_QA_DRIVER_ID
-    : senderId === "observer"
-      ? TELEGRAM_QA_OBSERVER_ID
-      : senderId;
-}
 
 function resolveMatrixQaSenderId(senderId: string) {
   return senderId === "driver"
@@ -100,11 +90,7 @@ export function createCrablineProviderInboundInput(
       kind,
     },
     senderId:
-      adapter.channel === "telegram"
-        ? resolveTelegramQaSenderId(input.senderId)
-        : adapter.channel === "matrix"
-          ? resolveMatrixQaSenderId(input.senderId)
-          : input.senderId,
+      adapter.channel === "matrix" ? resolveMatrixQaSenderId(input.senderId) : input.senderId,
     text:
       adapter.channel === "matrix" && adapter.manifest.provider === "matrix"
         ? resolveMatrixQaText(input.text, adapter.manifest.botUserId)

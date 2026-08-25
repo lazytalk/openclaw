@@ -192,8 +192,8 @@ export const qaChannelPlugin: ChannelPlugin<ResolvedQaChannelAccount> = createCh
         });
         return buildThreadAwareOutboundSessionRoute({
           route: baseRoute,
-          // An explicit thread target is authoritative; reply metadata must not replace its thread.
-          replyToId: parsed.threadId === undefined ? replyToId : undefined,
+          // Structured thread identity is authoritative; reply metadata must not replace its thread.
+          replyToId: resolved.threadId === undefined ? replyToId : undefined,
           threadId: resolved.threadId,
           currentSessionKey,
           canRecoverCurrentThread: ({ route }) =>
