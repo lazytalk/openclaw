@@ -501,6 +501,57 @@ describe("qa suite runtime flow", () => {
     }
   });
 
+  it("leaves the lifecycle deadline unset when the scenario delegates timeout ownership", async () => {
+    vi.useFakeTimers();
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    try {
+      const env = createQaSuiteRuntimeFlowTestEnv();
+      const scenario = makeQaSuiteTestScenario("provider-owned-timeout", { config: {} });
+      if (scenario.execution.kind !== "flow") {
+        throw new Error("expected flow scenario");
+      }
+      createQaScenarioRuntimeApi.mockImplementationOnce(
+        (params: { deps: { runScenario: typeof runQaSuiteScenarioSteps } }) => ({
+          runScenario: params.deps.runScenario,
+        }),
+      );
+      runScenarioFlow.mockImplementationOnce(async (params) => {
+        const api = params.api as { runScenario: typeof runQaSuiteScenarioSteps };
+        return await api.runScenario("Provider-owned timeout", [
+          {
+            name: "Complete under the provider deadline",
+            run: async () => {
+              await new Promise<void>((resolve) => {
+                setTimeout(resolve, 10_000);
+              });
+            },
+          },
+        ]);
+      });
+
+      const pending = runQaSuiteScenarioDefinition({
+        env,
+        scenario,
+        runScenario: runQaSuiteScenarioSteps,
+        splitModelRef: (raw) => parseModelRef(raw, "openai"),
+        formatErrorMessage: (error) => String(error),
+        liveTurnTimeoutMs: () => 60_000,
+        resolveQaLiveTurnTimeoutMs: () => 60_000,
+        constants: qaSuiteRuntimeFlowTestConstants,
+      });
+      expect(timeoutSpy).toHaveBeenCalledTimes(1);
+      expect(timeoutSpy).toHaveBeenLastCalledWith(expect.any(Function), 10_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(await pending).toMatchObject({ status: "pass" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      timeoutSpy.mockRestore();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it("caps and disposes the lifecycle watchdog without advancing the maximum timer", async () => {
     vi.useFakeTimers();
     const timeoutSpy = vi.spyOn(globalThis, "setTimeout");

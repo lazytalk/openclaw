@@ -8,6 +8,7 @@ scenario:
   execution:
     kind: flow
     channel: matrix
+    deadlineOwner: provider
     retryCount: 0
 
 flow:

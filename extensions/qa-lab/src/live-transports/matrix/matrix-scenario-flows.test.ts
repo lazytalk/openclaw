@@ -24,12 +24,6 @@ const MATRIX_ISOLATED_ALLOWBOTS_ADMISSION_SCENARIOS = [
   "matrix-allowbots-true-unmentioned-open-room",
 ] as const;
 
-const MATRIX_PROVIDER_DEADLINE_SCENARIOS = new Set([
-  "matrix-e2ee-thread-follow-up",
-  "matrix-inbound-edit-no-duplicate-trigger",
-  "matrix-thread-nested-reply-shape",
-]);
-
 function readModuleBinding(
   scenario: ReturnType<typeof readQaBootstrapScenarioCatalog>["scenarios"][number],
 ) {
@@ -99,9 +93,6 @@ describe("Matrix QA Lab scenario flows", () => {
       }
       expect(scenario.execution.channel, scenario.id).toBe("matrix");
       expect(scenario.execution.retryCount, scenario.id).toBe(0);
-      if (!MATRIX_PROVIDER_DEADLINE_SCENARIOS.has(scenario.id)) {
-        expect(scenario.execution.timeoutMs, scenario.id).toBeGreaterThan(0);
-      }
       expect(scenario.execution.flow?.steps.at(-1)?.detailsExpr, scenario.id).toBe(
         "result.details ?? (result.artifacts ? JSON.stringify(result.artifacts, null, 2) : undefined)",
       );
@@ -126,11 +117,16 @@ describe("Matrix QA Lab scenario flows", () => {
     }
   });
 
-  it("uses provider-owned deadlines for model-driven multi-phase Matrix flows", () => {
-    for (const scenarioId of MATRIX_PROVIDER_DEADLINE_SCENARIOS) {
-      const execution = requireFlowScenario(readQaScenarioById(scenarioId)).execution;
-      expect(execution.timeoutMs, scenarioId).toBeUndefined();
+  it("keeps provider-owned deadlines outside the scenario lifecycle", () => {
+    let providerDeadlineScenarioCount = 0;
+    for (const scenario of scenarios) {
+      if (scenario.execution.kind !== "flow" || scenario.execution.deadlineOwner !== "provider") {
+        continue;
+      }
+      providerDeadlineScenarioCount += 1;
+      expect(scenario.execution.timeoutMs, scenario.id).toBeUndefined();
     }
+    expect(providerDeadlineScenarioCount).toBeGreaterThan(0);
   });
 
   it("applies the portable thread override through Matrix flow preparation", () => {
