@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getSnapshot: vi.fn(),
   loadSnapshot: vi.fn(),
   prepareSnapshot: vi.fn(),
+  prepareScopedLiveCatalog: vi.fn(),
   prepareScopedCatalog: vi.fn(),
   isFullCatalog: vi.fn(),
   releaseSnapshot: vi.fn(),
@@ -56,7 +57,7 @@ vi.mock("./prepared-model-runtime.full-catalog.js", () => ({
 
 vi.mock("./prepared-model-runtime.scoped-catalog.js", () => ({
   prepareScopedReadOnlyLiveModelCatalog: (...args: unknown[]) =>
-    mocks.prepareScopedCatalog(...args),
+    mocks.prepareScopedLiveCatalog(...args),
   prepareScopedReadOnlyModelCatalog: (...args: unknown[]) => mocks.prepareScopedCatalog(...args),
 }));
 
@@ -108,6 +109,7 @@ describe("prepared model catalog access", () => {
     mocks.getSnapshot.mockReset();
     mocks.loadSnapshot.mockReset();
     mocks.prepareSnapshot.mockReset();
+    mocks.prepareScopedLiveCatalog.mockReset();
     mocks.prepareScopedCatalog.mockReset();
     mocks.isFullCatalog.mockReset();
     mocks.releaseSnapshot.mockReset();
@@ -198,6 +200,7 @@ describe("prepared model catalog access", () => {
       }),
       ["anthropic"],
     );
+    expect(mocks.prepareScopedLiveCatalog).not.toHaveBeenCalled();
   });
 
   it("keeps read-only catalog reads on configured facts and materializes full reads once", async () => {
@@ -329,7 +332,7 @@ describe("prepared model catalog access", () => {
     setPreparedModelRuntimeAuthMaterializations(committedSnapshot, materializations);
     mocks.prepareSnapshot.mockResolvedValue(committedSnapshot);
     mocks.isFullCatalog.mockReturnValue(false);
-    mocks.prepareScopedCatalog.mockResolvedValue(scopedCatalog);
+    mocks.prepareScopedLiveCatalog.mockResolvedValue(scopedCatalog);
 
     const projected = await loadPublishedPreparedModelCatalogOwnerSnapshot({
       providerDiscoveryProviderIds: ["anthropic"],
@@ -361,7 +364,7 @@ describe("prepared model catalog access", () => {
       authMaterializations: materializations,
     });
     expect(loadAuth).toHaveBeenCalledOnce();
-    expect(mocks.prepareScopedCatalog).toHaveBeenCalledWith(
+    expect(mocks.prepareScopedLiveCatalog).toHaveBeenCalledWith(
       expect.objectContaining({
         agentDir: committedSnapshot.agentDir,
         config: committedSnapshot.config,
@@ -370,6 +373,7 @@ describe("prepared model catalog access", () => {
       }),
       ["anthropic"],
     );
+    expect(mocks.prepareScopedCatalog).not.toHaveBeenCalled();
   });
 
   it("restores the unique configured agent identity for a published replacement owner", async () => {
