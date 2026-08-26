@@ -284,9 +284,10 @@ describe("runtime parity suite transport cleanup", () => {
     mocks.writeQaSuiteArtifacts.mockClear();
     const scenario = makeQaSuiteTestScenario("runtime-cleanup");
     const selection = {
-      capabilityMatrixPath: "crabline-fake-provider-capabilities.json",
+      capabilityMatrixPath: "crabline-channel-driver-capabilities.json",
       channel: "telegram",
       channelDriver: "crabline",
+      providerReadinessArtifactPath: "crabline-provider-readiness.json",
       smokeArtifactPath: "crabline-fake-provider-smoke.json",
     } as const;
     const parentLab = createCleanupTestLab();
