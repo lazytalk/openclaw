@@ -14649,6 +14649,17 @@
       ]
     },
     {
+      "id": "native.android.5616a95a172222e1",
+      "source": "Secret value",
+      "surface": "android",
+      "sites": [
+        {
+          "kind": "ui-call",
+          "path": "apps/android/app/src/main/java/ai/openclaw/app/ui/chat/ChatQuestionCard.kt"
+        }
+      ]
+    },
+    {
       "id": "native.android.2585b0fd6b35688c",
       "source": "Secure (TLS)",
       "surface": "android",
@@ -19542,7 +19553,7 @@
       "sites": [
         {
           "kind": "ui-localized-call",
-          "path": "apps/ios/Sources/Voice/VoicePermissionSupport.swift"
+          "path": "apps/ios/Sources/Voice/TalkModeManager+Permissions.swift"
         },
         {
           "kind": "ui-localized-call",
@@ -19557,7 +19568,7 @@
       "sites": [
         {
           "kind": "ui-localized-call",
-          "path": "apps/ios/Sources/Voice/VoicePermissionSupport.swift"
+          "path": "apps/ios/Sources/Voice/TalkModeManager+Permissions.swift"
         },
         {
           "kind": "ui-localized-call",
@@ -19572,7 +19583,11 @@
       "sites": [
         {
           "kind": "ui-localized-call",
-          "path": "apps/ios/Sources/Voice/VoicePermissionSupport.swift"
+          "path": "apps/ios/Sources/Voice/TalkModeManager+Permissions.swift"
+        },
+        {
+          "kind": "ui-localized-call",
+          "path": "apps/ios/Sources/Voice/VoiceWakeManager.swift"
         }
       ]
     },
@@ -42841,6 +42856,21 @@
         {
           "kind": "ui-call",
           "path": "apps/macos/Sources/OpenClaw/CronJobEditor.swift"
+        }
+      ]
+    },
+    {
+      "id": "native.apple.eb87a5d402f5de88",
+      "source": "Secret value",
+      "surface": "apple",
+      "sites": [
+        {
+          "kind": "ui-call",
+          "path": "apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatQuestionCard.swift"
+        },
+        {
+          "kind": "ui-modifier",
+          "path": "apps/shared/OpenClawKit/Sources/OpenClawChatUI/ChatQuestionCard.swift"
         }
       ]
     },
