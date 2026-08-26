@@ -306,7 +306,7 @@ describe("Anthropic server compaction host threshold", () => {
     ).toBe(expected);
   });
 
-  it("uses the selected agent context window for the fallback threshold", () => {
+  it("uses the resolved Anthropic context window for the fallback threshold", () => {
     const cfg: OpenClawConfig = {
       agents: {
         defaults: {

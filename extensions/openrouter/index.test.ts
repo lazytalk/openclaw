@@ -551,8 +551,8 @@ describe("openrouter provider hooks", () => {
       },
     } as never);
 
-    expect(contribution?.dynamicSuffix).toContain("Analysis models: agent/model.");
-    expect(contribution?.dynamicSuffix).not.toContain("default/model");
+    expect(contribution?.dynamicSuffix).toContain("Analysis models: default/model.");
+    expect(contribution?.dynamicSuffix).not.toContain("agent/model");
   });
 
   it("matches transport alias precedence for Fusion extra body", async () => {

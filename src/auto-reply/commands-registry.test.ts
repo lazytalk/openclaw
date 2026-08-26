@@ -572,7 +572,7 @@ describe("commands registry", () => {
     expect(menu.choices).toEqual([
       { label: "on", value: "on" },
       { label: "off", value: "off" },
-      { label: "auto (15 sec)", value: "auto" },
+      { label: "auto (20 sec)", value: "auto" },
       { label: "default", value: "default" },
       { label: "status", value: "status" },
     ]);

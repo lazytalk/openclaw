@@ -158,7 +158,6 @@ function resolveFusionExtraBody(
     readRecord(ctx.config?.agents?.defaults?.params),
     findConfiguredOpenRouterModelParams(ctx.config?.agents?.defaults?.models, ctx.modelId),
     readRecord(agentConfig?.params),
-    findConfiguredOpenRouterModelParams(agentConfig?.models, ctx.modelId),
   ];
   let effective: Record<string, unknown> | undefined;
   for (const source of sources) {
