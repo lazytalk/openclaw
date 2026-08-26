@@ -19553,7 +19553,7 @@
       "sites": [
         {
           "kind": "ui-localized-call",
-          "path": "apps/ios/Sources/Voice/TalkModeManager+Permissions.swift"
+          "path": "apps/ios/Sources/Voice/VoicePermissionSupport.swift"
         },
         {
           "kind": "ui-localized-call",
@@ -19568,7 +19568,7 @@
       "sites": [
         {
           "kind": "ui-localized-call",
-          "path": "apps/ios/Sources/Voice/TalkModeManager+Permissions.swift"
+          "path": "apps/ios/Sources/Voice/VoicePermissionSupport.swift"
         },
         {
           "kind": "ui-localized-call",
@@ -19583,11 +19583,7 @@
       "sites": [
         {
           "kind": "ui-localized-call",
-          "path": "apps/ios/Sources/Voice/TalkModeManager+Permissions.swift"
-        },
-        {
-          "kind": "ui-localized-call",
-          "path": "apps/ios/Sources/Voice/VoiceWakeManager.swift"
+          "path": "apps/ios/Sources/Voice/VoicePermissionSupport.swift"
         }
       ]
     },
