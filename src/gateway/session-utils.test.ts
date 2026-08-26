@@ -989,7 +989,7 @@ describe("gateway session utils", () => {
     expect(row.contextWindows).toEqual(catalog[0]?.contextWindows);
   });
 
-  test("session defaults use the selected agent's context scope", () => {
+  test("session defaults ignore nested agent-model params", () => {
     const cfg = {
       agents: {
         defaults: { params: { context1m: false } },
@@ -1005,9 +1005,7 @@ describe("gateway session utils", () => {
       },
     } as OpenClawConfig;
 
-    expect(getSessionDefaults(cfg, undefined, { agentId: "reviewer" }).contextTokens).toBe(
-      1_000_000,
-    );
+    expect(getSessionDefaults(cfg, undefined, { agentId: "reviewer" }).contextTokens).toBe(200_000);
   });
 
   test("session rows project automation bindings and event fields forward them", () => {

@@ -69,7 +69,7 @@ function buildHostConfig(params: {
 }
 
 describe("Responses server compaction host/transport parity", () => {
-  it("uses the active agent-model compaction threshold", () => {
+  it("does not activate a nested agent-model compaction threshold", () => {
     const modelRef = modelKey("openai", TEST_MODEL_ID);
     const cfg: OpenClawConfig = {
       agents: {
@@ -93,7 +93,7 @@ describe("Responses server compaction host/transport parity", () => {
         modelId: TEST_MODEL_ID,
         agentId: "audit",
       }),
-    ).toBe(175_000);
+    ).toBe(120_000);
   });
 
   it.each([

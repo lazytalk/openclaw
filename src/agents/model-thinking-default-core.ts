@@ -34,16 +34,13 @@ export function resolveConfiguredThinkingDefaultCore(params: {
   model: string;
   agentId?: string;
 }): ThinkLevel | undefined {
-  const { modelParams, agentModelParams } = resolveModelExtraParamSources({
+  const { modelParams } = resolveModelExtraParamSources({
     config: params.cfg,
     provider: params.provider,
     modelId: params.model,
     agentId: params.agentId,
   });
-  const perModelThinking =
-    agentModelParams && Object.hasOwn(agentModelParams, "thinking")
-      ? agentModelParams.thinking
-      : modelParams?.thinking;
+  const perModelThinking = modelParams?.thinking;
   if (
     perModelThinking === false ||
     perModelThinking === "disabled" ||

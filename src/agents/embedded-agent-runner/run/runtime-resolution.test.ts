@@ -28,7 +28,7 @@ describe("resolveInitialThinkLevel", () => {
     ).toBe("ultra");
   });
 
-  it("uses the selected agent model thinking default", () => {
+  it("does not activate a nested agent-model thinking param", () => {
     expect(
       resolveInitialThinkLevel({
         config: {
@@ -48,7 +48,7 @@ describe("resolveInitialThinkLevel", () => {
         model: { reasoning: true },
         agentId: "audit",
       }),
-    ).toBe("high");
+    ).toBe("low");
   });
 });
 
@@ -75,6 +75,6 @@ describe("resolveThinkingDefaultWithRuntimeCatalog", () => {
           { provider: "openai", id: "gpt-5.5", name: "gpt-5.5", reasoning: true },
         ],
       }),
-    ).resolves.toBe("high");
+    ).resolves.toBe("low");
   });
 });

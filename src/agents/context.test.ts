@@ -393,7 +393,7 @@ describe("resolveContextTokensForModel", () => {
     expect(result).toBe(ANTHROPIC_CONTEXT_1M_TOKENS);
   });
 
-  it("honors an agent model context1m override", () => {
+  it("does not activate a nested agent-model context1m param", () => {
     const result = resolveContextTokensForModel({
       cfg: {
         agents: {
@@ -420,7 +420,7 @@ describe("resolveContextTokensForModel", () => {
       allowAsyncLoad: false,
     });
 
-    expect(result).toBe(ANTHROPIC_CONTEXT_1M_TOKENS);
+    expect(result).toBe(200_000);
   });
 
   it("returns 1M context when claude-cli context1m is enabled for a GA 1M model", () => {

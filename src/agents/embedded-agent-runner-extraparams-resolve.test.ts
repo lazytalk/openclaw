@@ -139,7 +139,7 @@ describe("resolveExtraParams", () => {
     });
   });
 
-  it("applies agent-model params at the narrowest config precedence", () => {
+  it("does not activate nested agent-model params as request precedence", () => {
     const result = resolveExtraParams({
       cfg: {
         agents: {
@@ -169,9 +169,9 @@ describe("resolveExtraParams", () => {
     });
 
     expect(result).toEqual({
-      temperature: 0.2,
-      topP: 0.3,
-      maxTokens: 321,
+      temperature: 0.7,
+      topP: 0.8,
+      maxTokens: 2048,
       cacheRetention: "none",
     });
   });
@@ -313,7 +313,7 @@ describe("resolveExtraParams", () => {
     });
   });
 
-  it("preserves agent-model precedence across max-token alias styles", () => {
+  it("does not let nested agent-model aliases override request params", () => {
     const result = resolveExtraParams({
       cfg: {
         agents: {
@@ -333,7 +333,7 @@ describe("resolveExtraParams", () => {
     });
 
     expect(result).toEqual({
-      maxTokens: 200,
+      maxTokens: 100,
       parallel_tool_calls: true,
       text_verbosity: "low",
     });

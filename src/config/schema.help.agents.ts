@@ -73,8 +73,7 @@ export const AGENT_FIELD_HELP: Record<string, string> = {
     "Optional lower-cost model (provider/model or alias) for short internal tasks such as generated titles and progress narration. Unset derives the primary provider's declared small model when available (otherwise the primary model); set to an empty string to disable utility routing.",
   "agents.entries.*.utilityModel":
     "Optional per-agent utility model override for short internal tasks. Overrides agents.defaults.utilityModel.",
-  "agents.entries.*.models":
-    "Per-agent model catalog overrides keyed by full provider/model IDs. Nested params override global, default-model, and flat per-agent params for the matching agent and model.",
+  "agents.entries.*.models": "Per-agent model catalog overrides keyed by full provider/model IDs.",
   "agents.entries.*.modelPolicy":
     "Per-agent model override policy. An explicit allow list replaces the default policy for this agent.",
   "agents.entries.*.modelPolicy.allow":

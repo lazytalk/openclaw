@@ -35,7 +35,7 @@ necessarily delete the provider's older cache entry before its normal expiry.
 
 ### `cacheRetention`
 
-Values: `"none" | "short" | "long"`. Configurable as a global default, per model, per agent, and per agent-model pair.
+Values: `"none" | "short" | "long"`. Configurable as a global default, per model, and per agent.
 `"standard"` is not an alias; use `"short"` for the provider's default cache window. Invalid values are ignored with a warning.
 
 ```yaml
@@ -47,14 +47,10 @@ agents:
       "anthropic/claude-opus-4-6":
         params:
           cacheRetention: "short" # overrides the global default for this model
-  entries:
-    alerts:
+  list:
+    - id: "alerts"
       params:
         cacheRetention: "none" # overrides both defaults for this agent
-      models:
-        "anthropic/claude-opus-4-6":
-          params:
-            cacheRetention: "long" # narrowest override: this agent and model only
 ```
 
 Merge order (later wins):
@@ -62,7 +58,6 @@ Merge order (later wins):
 1. `agents.defaults.params` - global default for all models
 2. `agents.defaults.models["provider/model"].params` - per-model override
 3. `agents.entries.*.params` - per-agent override, matched by agent id
-4. `agents.entries.*.models["provider/model"].params` - per-agent, per-model override
 
 Source: `src/agents/embedded-agent-runner/extra-params.ts` (`resolveExtraParams`).
 

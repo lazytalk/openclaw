@@ -71,7 +71,9 @@ export function resolveModelExtraParamSources(params: {
     ? (agentConfig?.models?.[canonicalKey]?.params ??
       (legacyKey ? agentConfig?.models?.[legacyKey]?.params : undefined))
     : undefined;
-  const paramSources = [defaultParams, modelParams, agentEntryParams, agentModelParams];
+  // Per-agent model entries own catalog and runtime policy. Their `params`
+  // shape is not a provider-request precedence scope.
+  const paramSources = [defaultParams, modelParams, agentEntryParams];
   return { defaultParams, modelParams, agentEntryParams, agentModelParams, paramSources };
 }
 

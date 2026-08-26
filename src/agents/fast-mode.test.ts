@@ -119,7 +119,7 @@ describe("resolveFastModeState", () => {
     expect(state.source).toBe("config");
   });
 
-  it("uses per-agent model fast params at the narrowest config precedence", () => {
+  it("does not activate nested agent-model fast params", () => {
     const cfg = {
       agents: {
         defaults: {
@@ -149,10 +149,10 @@ describe("resolveFastModeState", () => {
     });
 
     expect(state).toMatchObject({
-      mode: "auto",
-      enabled: true,
+      mode: false,
+      enabled: false,
       source: "config",
-      fastAutoOnSeconds: 15,
+      fastAutoOnSeconds: 30,
     });
   });
 

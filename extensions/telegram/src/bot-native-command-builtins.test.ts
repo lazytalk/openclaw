@@ -403,7 +403,7 @@ describe("Telegram native command built-ins", () => {
     expect(replyMocks.dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
   });
 
-  it("uses the selected agent-model thinking default", async () => {
+  it("does not activate nested agent-model thinking params", async () => {
     const cfg = {
       agents: {
         defaults: {
@@ -433,9 +433,9 @@ describe("Telegram native command built-ins", () => {
     expectSendMessageCall({
       sendMessage,
       chatId: 100,
-      textIncludes: "Current thinking level: high.\nChoose level for /think.",
+      textIncludes: "Current thinking level: low.\nChoose level for /think.",
       requireReplyMarkup: true,
-      label: "agent-model thinking menu",
+      label: "default-model thinking menu",
     });
   });
 

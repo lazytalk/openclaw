@@ -121,7 +121,7 @@ describe("OpenAI runtime routing policy", () => {
   });
 
   it.each(["global", "agent", "agent-model"] as const)(
-    "keeps authored provider params at %s scope on OpenClaw",
+    "routes authored provider params at supported %s scope",
     (scope) => {
       const { config, agentId } = createScopedOpenAIRoutingConfig(scope, { temperature: 0.4 });
 
@@ -133,18 +133,18 @@ describe("OpenAI runtime routing policy", () => {
           agentId,
           env: {},
         }),
-      ).toBe("openclaw");
+      ).toBe(scope === "agent-model" ? "codex" : "openclaw");
       expect(
         modelSelectionShouldEnsureCodexPlugin({
           model: "openai/gpt-5.6-sol",
           config,
           agentId,
         }),
-      ).toBe(false);
+      ).toBe(scope === "agent-model");
     },
   );
 
-  it("classifies the effective alias after agent-model parameter precedence", () => {
+  it("ignores nested agent-model aliases outside request precedence", () => {
     const modelKey = "openai/gpt-5.6-sol";
     const config = {
       agents: {
@@ -169,10 +169,10 @@ describe("OpenAI runtime routing policy", () => {
         agentId: "audit",
         env: {},
       }),
-    ).toBe("codex");
+    ).toBe("openclaw");
     expect(
       modelSelectionShouldEnsureCodexPlugin({ model: modelKey, config, agentId: "audit" }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("maps provider route facts onto a closed implicit runtime", () => {
