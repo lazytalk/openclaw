@@ -104,10 +104,14 @@ export function resolveInitialEmbeddedRunModel(params: {
 
   if (explicitModel) {
     const provider = explicitProvider ?? defaultProvider;
+    // Preliminary route identification stays static; prepared metadata owns
+    // plugin and workspace normalization once the runtime context exists.
     const aliasIndex = buildModelAliasIndex({
       cfg,
       agentId: params.agentId,
       defaultProvider: provider,
+      allowManifestNormalization: false,
+      allowPluginNormalization: false,
     });
     const resolved = resolveModelRefFromString({
       cfg,
@@ -115,6 +119,8 @@ export function resolveInitialEmbeddedRunModel(params: {
       raw: explicitModel,
       defaultProvider: provider,
       aliasIndex,
+      allowManifestNormalization: false,
+      allowPluginNormalization: false,
     });
     return {
       provider: explicitProvider ?? resolved?.ref.provider ?? provider,
