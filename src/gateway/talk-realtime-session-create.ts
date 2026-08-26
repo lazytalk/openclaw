@@ -1,13 +1,19 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
-import type { TalkSessionCreateParams } from "../../packages/gateway-protocol/src/index.js";
+import type {
+  ErrorShape,
+  TalkSessionCreateParams,
+} from "../../packages/gateway-protocol/src/index.js";
 import { buildAgentMainSessionKey } from "../routing/session-key.js";
+import { assertSecretOwnerAvailable } from "../secrets/runtime-degraded-state.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { REALTIME_VOICE_AGENT_CONSULT_TOOL } from "../talk/agent-consult-tool.js";
 import { REALTIME_VOICE_AGENT_CONTROL_TOOL } from "../talk/agent-run-control-shared.js";
 import { resolveTalkSessionAgentId } from "../talk/agent-target.js";
 import { ensureClientVoiceAgentSessionEntry } from "../talk/client-voice-session.js";
 import { resolveConfiguredRealtimeVoiceProvider } from "../talk/provider-resolver.js";
+import { authorizeGatewaySessionCreation } from "./operator-role-policy.js";
+import type { GatewayClient } from "./server-methods/shared-types.js";
 import {
   buildRealtimeInstructions,
   buildRealtimeVoiceLaunchOptions,
@@ -62,8 +68,15 @@ export function getPluginTalkSessionDispatchContext(
 
 export class TalkRealtimeSessionRequestError extends Error {}
 
+export class TalkRealtimeSessionAuthorizationError extends Error {
+  constructor(readonly errorShape: ErrorShape) {
+    super(errorShape.message);
+  }
+}
+
 export async function createGatewayRealtimeTalkSession(params: {
   context: GatewayRequestContext;
+  client: GatewayClient | null | undefined;
   ownerId: string;
   agentId?: string;
   consultAuthority: TalkAgentConsultAuthority;
@@ -79,6 +92,7 @@ export async function createGatewayRealtimeTalkSession(params: {
   });
   const agentId =
     params.agentId ?? resolveTalkSessionAgentId(runtimeConfig, params.request.sessionKey);
+  assertSecretOwnerAvailable("capability", "talk:realtime");
   const resolution = resolveConfiguredRealtimeVoiceProvider({
     configuredProviderId: realtimeConfig.provider,
     providerConfigs: realtimeConfig.providers,
@@ -108,6 +122,14 @@ export async function createGatewayRealtimeTalkSession(params: {
   const sessionKey =
     realtimeContext.requestedSessionKey ??
     buildAgentMainSessionKey({ agentId: realtimeContext.agentId });
+  const creationError = authorizeGatewaySessionCreation({
+    cfg: runtimeConfig,
+    client: params.client,
+    agentId: realtimeContext.agentId,
+  });
+  if (creationError) {
+    throw new TalkRealtimeSessionAuthorizationError(creationError);
+  }
   await ensureClientVoiceAgentSessionEntry({ agentId: realtimeContext.agentId, sessionKey });
   const session = createTalkRealtimeRelaySession({
     context: params.context,

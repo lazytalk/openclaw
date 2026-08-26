@@ -28,6 +28,7 @@ import {
 import {
   createGatewayRealtimeTalkSession,
   getPluginTalkSessionDispatchContext,
+  TalkRealtimeSessionAuthorizationError,
   TalkRealtimeSessionRequestError,
 } from "../talk-realtime-session-create.js";
 import {
@@ -251,6 +252,7 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
         try {
           const session = await createGatewayRealtimeTalkSession({
             context,
+            client,
             ownerId: pluginDispatch?.ownerId ?? connId,
             agentId,
             consultAuthority: resolveTalkAgentConsultAuthority(client?.connect?.scopes),
@@ -264,6 +266,10 @@ export const talkSessionHandlers: GatewayRequestHandlers = {
           });
           return respondOk(respond, session);
         } catch (error) {
+          if (error instanceof TalkRealtimeSessionAuthorizationError) {
+            respond(false, undefined, error.errorShape);
+            return;
+          }
           if (error instanceof TalkRealtimeSessionRequestError) {
             respondInvalidRequest(respond, error.message);
             return;

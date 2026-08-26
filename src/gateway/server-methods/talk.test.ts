@@ -80,6 +80,7 @@ const mocks = vi.hoisted(() => ({
   closeStaleClientVoiceSessions: vi.fn(async () => 0),
   createOrResumeClientVoiceSession: vi.fn(() => "voice-test"),
   ensureClientVoiceAgentSessionEntry: vi.fn(async () => "session-main"),
+  authorizeGatewaySessionCreation: vi.fn<() => unknown>(() => undefined),
   resolveClientVoiceAgentSessionId: vi.fn<() => string | undefined>(() => "session-main"),
   assertClientVoiceSessionOpen: vi.fn(),
   registerClientVoiceConsultRun: vi.fn(),
@@ -196,6 +197,14 @@ vi.mock("./chat-send-handler.js", () => ({
 vi.mock("../sessions-resolve.js", () => ({
   resolveSessionKeyFromResolveParams: mocks.resolveSessionKeyFromResolveParams,
 }));
+
+vi.mock("../operator-role-policy.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../operator-role-policy.js")>();
+  return {
+    ...actual,
+    authorizeGatewaySessionCreation: mocks.authorizeGatewaySessionCreation,
+  };
+});
 
 vi.mock("../talk-realtime-relay.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../talk-realtime-relay.js")>();
@@ -2047,6 +2056,46 @@ describe("talk.session unified handlers", () => {
       }),
     );
     expectRespondOk(respond, { relaySessionId: "relay-plugin-owner" });
+  });
+
+  it("rejects realtime creation when the resolved agent exceeds the operator role", async () => {
+    const provider = {
+      id: "openai",
+      label: "OpenAI Realtime",
+      isConfigured: () => true,
+      createBridge: vi.fn(),
+    };
+    mocks.resolveConfiguredRealtimeVoiceProvider.mockReturnValue({ provider, providerConfig: {} });
+    mocks.authorizeGatewaySessionCreation.mockReturnValueOnce({
+      code: ErrorCodes.FORBIDDEN,
+      message: 'Your operator role cannot create sessions for agent "research"',
+    });
+    const respond = vi.fn();
+    const client = { connId: "conn-1", connect: { scopes: ["operator.talk"] } };
+    const config = {
+      talk: { realtime: { provider: "openai", providers: { openai: {} } } },
+    } as OpenClawConfig;
+
+    await callTalkHandler("talk.session.create", {
+      params: {
+        sessionKey: "agent:research:main",
+        mode: "realtime",
+        transport: "gateway-relay",
+        brain: "agent-consult",
+      },
+      client,
+      respond,
+      context: { getRuntimeConfig: () => config, logGateway: { warn: vi.fn() } },
+    });
+
+    expect(mocks.authorizeGatewaySessionCreation).toHaveBeenCalledWith({
+      cfg: config,
+      client,
+      agentId: "research",
+    });
+    expectRespondError(respond, { code: ErrorCodes.FORBIDDEN });
+    expect(mocks.ensureClientVoiceAgentSessionEntry).not.toHaveBeenCalled();
+    expect(mocks.createTalkRealtimeRelaySession).not.toHaveBeenCalled();
   });
 
   it("uses talk.agentId for a bare realtime session in an explicit fleet", async () => {
