@@ -246,7 +246,6 @@ describe("isolated QA suite transport cleanup", () => {
       channel: "telegram",
       channelDriver: "crabline",
       providerReadinessArtifactPath: "crabline-provider-readiness.json",
-      smokeArtifactPath: "crabline-fake-provider-smoke.json",
     } as const;
     let activeWorkers = 0;
     let maxActiveWorkers = 0;

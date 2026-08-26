@@ -288,7 +288,6 @@ describe("runtime parity suite transport cleanup", () => {
       channel: "telegram",
       channelDriver: "crabline",
       providerReadinessArtifactPath: "crabline-provider-readiness.json",
-      smokeArtifactPath: "crabline-fake-provider-smoke.json",
     } as const;
     const parentLab = createCleanupTestLab();
     const openClawLab = createCleanupTestLab();
