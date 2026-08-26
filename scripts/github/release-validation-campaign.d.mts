@@ -27,8 +27,24 @@ export function validateReleaseValidationCampaignArtifact(
   },
 ): ReleaseValidationCampaignArtifact;
 
+/** The subset of the actions/github-script Octokit client the publisher touches. */
+export type ReleaseValidationCampaignGitHub = {
+  paginate(route: unknown, params: Record<string, unknown>): Promise<unknown[]>;
+  rest: {
+    issues: {
+      getLabel(params: Record<string, unknown>): Promise<unknown>;
+      createLabel(params: Record<string, unknown>): Promise<unknown>;
+      createComment(params: Record<string, unknown>): Promise<unknown>;
+      create(params: Record<string, unknown>): Promise<{ data: unknown }>;
+      update(params: Record<string, unknown>): Promise<{ data: unknown }>;
+      get(params: { issue_number: number }): Promise<{ data: unknown }>;
+      listForRepo: unknown;
+    };
+  };
+};
+
 export function runReleaseValidationCampaignPublish(params: {
-  github: any;
+  github: ReleaseValidationCampaignGitHub;
   context: { repo: { owner: string; repo: string } };
   core: { info(message: string): void; setOutput?(name: string, value: string): void };
   artifact: unknown;
