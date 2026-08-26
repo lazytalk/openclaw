@@ -198,13 +198,17 @@ export async function openPluginTalkSession(
     {
       aborted: false,
     };
-  const stopRelay = (): void => {
+  const stopRelay = (disposition?: "detach"): void => {
     const relaySessionId = lifecycle.relaySessionId;
     if (!relaySessionId || events.closed) {
       return;
     }
     try {
-      stopTalkRealtimeRelaySession({ relaySessionId, connId: ownerId });
+      stopTalkRealtimeRelaySession({
+        relaySessionId,
+        connId: ownerId,
+        ...(disposition ? { disposition } : {}),
+      });
     } catch (error) {
       context.logGateway.warn(`plugin Talk session cleanup failed: ${formatErrorMessage(error)}`);
     }
@@ -217,7 +221,7 @@ export async function openPluginTalkSession(
   });
   const abort = (): void => {
     lifecycle.aborted = true;
-    stopRelay();
+    stopRelay("detach");
   };
   params.signal.addEventListener("abort", abort, { once: true });
   lifecycle.removeAbortListener = () => params.signal.removeEventListener("abort", abort);
@@ -262,7 +266,7 @@ export async function openPluginTalkSession(
   }
   lifecycle.relaySessionId = relaySessionId;
   if (lifecycle.aborted || deliveryError) {
-    stopRelay();
+    stopRelay(lifecycle.aborted ? "detach" : undefined);
     lifecycle.removeAbortListener();
     if (deliveryError) {
       throw deliveryError instanceof Error

@@ -671,7 +671,12 @@ export function resetTalkRealtimeRelayContinuity(
 export function stopTalkRealtimeRelaySession(params: {
   relaySessionId: string;
   connId: string;
+  disposition?: RealtimeVoiceCloseOptions["disposition"];
 }): void {
   const session = getRelaySession(params.relaySessionId, params.connId);
-  closeRelaySession(session, "completed");
+  closeRelaySession(
+    session,
+    "completed",
+    params.disposition ? { disposition: params.disposition } : undefined,
+  );
 }

@@ -334,6 +334,7 @@ describe("plugin Talk session", () => {
     expect(mocks.stopSession).toHaveBeenCalledWith({
       relaySessionId: "relay-1",
       connId: createParams.ownerId,
+      disposition: "detach",
     });
   });
 
@@ -359,6 +360,7 @@ describe("plugin Talk session", () => {
     expect(mocks.stopSession).toHaveBeenCalledWith({
       relaySessionId: "relay-late",
       connId: createParams.ownerId,
+      disposition: "detach",
     });
   });
 });
