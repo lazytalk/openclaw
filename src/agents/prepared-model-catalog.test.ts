@@ -330,6 +330,7 @@ describe("prepared model catalog access", () => {
       },
     ];
     setPreparedModelRuntimeAuthMaterializations(committedSnapshot, materializations);
+    mocks.getSnapshot.mockReturnValue(committedSnapshot);
     mocks.prepareSnapshot.mockResolvedValue(committedSnapshot);
     mocks.isFullCatalog.mockReturnValue(false);
     mocks.prepareScopedLiveCatalog.mockResolvedValue(scopedCatalog);
@@ -373,6 +374,23 @@ describe("prepared model catalog access", () => {
       }),
       ["anthropic"],
     );
+    expect(mocks.prepareScopedCatalog).not.toHaveBeenCalled();
+  });
+
+  it("does not project scoped discovery from a retired fallback lease", async () => {
+    mocks.prepareSnapshot.mockRejectedValue(new PreparedModelRuntimeOwnerNotPublishedError());
+    mocks.loadSnapshot.mockResolvedValue(fullSnapshot);
+
+    await expect(
+      loadPreparedModelCatalogOwnerSnapshot({
+        providerDiscoveryProviderIds: ["anthropic"],
+        readOnly: true,
+        scopedLiveProviderDiscovery: true,
+      }),
+    ).resolves.toBe(fullSnapshot);
+
+    expect(mocks.releaseSnapshot).toHaveBeenCalledOnce();
+    expect(mocks.prepareScopedLiveCatalog).not.toHaveBeenCalled();
     expect(mocks.prepareScopedCatalog).not.toHaveBeenCalled();
   });
 
