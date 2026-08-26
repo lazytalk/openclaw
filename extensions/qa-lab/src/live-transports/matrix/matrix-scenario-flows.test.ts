@@ -120,11 +120,15 @@ describe("Matrix QA Lab scenario flows", () => {
   it("keeps provider-owned deadlines outside the scenario lifecycle", () => {
     let providerDeadlineScenarioCount = 0;
     for (const scenario of scenarios) {
-      if (scenario.execution.kind !== "flow" || scenario.execution.deadlineOwner !== "provider") {
+      if (scenario.execution.kind !== "flow") {
         continue;
       }
-      providerDeadlineScenarioCount += 1;
-      expect(scenario.execution.timeoutMs, scenario.id).toBeUndefined();
+      if (scenario.execution.deadlineOwner === "provider") {
+        providerDeadlineScenarioCount += 1;
+        expect(scenario.execution.timeoutMs, scenario.id).toBeUndefined();
+      } else {
+        expect(scenario.execution.timeoutMs, scenario.id).toBeGreaterThan(0);
+      }
     }
     expect(providerDeadlineScenarioCount).toBeGreaterThan(0);
   });
