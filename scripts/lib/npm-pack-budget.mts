@@ -4,10 +4,11 @@ import { resolveNpmJsonEntries } from "./npm-json-output.mts";
 // 2026.3.12 ballooned to ~213.6 MiB unpacked and correlated with low-memory
 // startup/doctor OOM reports. 2026.4.12 intentionally stages Matrix runtime
 // dependencies, including crypto wasm, so packaged installs do not miss Docker
-// and gateway runtime dependencies. Keep the budget below the 2026.3.12 bloat
-// level while allowing that mirrored runtime surface and the installed agent's
-// bundled user documentation.
-const NPM_PACK_UNPACKED_SIZE_BUDGET_BYTES = 204 * 1024 * 1024;
+// and gateway runtime dependencies. The 2026.8.1 package reached ~208.8 MiB
+// through required root dist growth without a duplicate packaged tree. Keep the
+// budget below the 2026.3.12 bloat level while retaining a narrow regression
+// margin for that audited runtime surface.
+const NPM_PACK_UNPACKED_SIZE_BUDGET_BYTES = 210 * 1024 * 1024;
 
 function formatMiB(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
