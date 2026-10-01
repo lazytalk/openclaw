@@ -963,6 +963,10 @@ export const AgentEntrySchema = z
 
 export const ToolsSchema = z
   .object({
+    executionWorkspace: z
+      .object({ mode: z.enum(["sandbox", "restricted-host"]).optional() })
+      .strict()
+      .optional(),
     artifacts: z
       .object({
         maxBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),

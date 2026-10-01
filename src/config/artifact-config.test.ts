@@ -22,4 +22,12 @@ describe("managed artifact host configuration", () => {
   it("rejects a total reservation below the per-file ceiling", () => {
     expect(() => resolveArtifactLimits({ maxBytes: 100, totalBytes: 99 })).toThrow("totalBytes");
   });
+  it("accepts only explicit host mode and rejects a caller-selected root", () => {
+    expect(ToolsSchema.safeParse({ executionWorkspace: { mode: "restricted-host" } }).success).toBe(
+      true,
+    );
+    expect(ToolsSchema.safeParse({ executionWorkspace: { mode: "sandbox" } }).success).toBe(true);
+    expect(ToolsSchema.safeParse({ executionWorkspace: { root: "/etc" } }).success).toBe(false);
+    expect(ToolsSchema.safeParse({ executionWorkspace: { mode: "auto" } }).success).toBe(false);
+  });
 });

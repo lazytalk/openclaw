@@ -2,7 +2,7 @@ import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coe
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
 // Health gateway methods return cached or refreshed status summaries while
 // detecting stale channel runtime state against live gateway snapshots.
-import { resolveArtifactLimits } from "../../agents/artifact-limits.js";
+import { artifactCapabilities } from "../../agents/artifact-capabilities.js";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
 import { loadConfig } from "../../config/config.js";
 import { getStatusSummary } from "../../status/summary.js";
@@ -138,7 +138,7 @@ function mergeCachedHealthRuntimeState(params: {
 /** Gateway handlers for health snapshots and status summaries. */
 export const healthHandlers: GatewayRequestHandlers = {
   health: async ({ respond, context, params, client }) => {
-    const managedArtifacts = resolveArtifactLimits(loadConfig().tools?.artifacts);
+    const managedArtifacts = artifactCapabilities(loadConfig().tools?.artifacts);
     const { getHealthCache, refreshHealthSnapshot, logHealth } = context;
     const wantsProbe = params?.probe === true;
     const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];

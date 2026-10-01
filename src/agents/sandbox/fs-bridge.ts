@@ -118,7 +118,10 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
           if (size > params.maxBytes) {
             throw new RangeError(`File exceeds ${params.maxBytes} bytes`);
           }
-          yield chunk as Buffer;
+          if (!Buffer.isBuffer(chunk)) {
+            throw new Error("Sandbox stream unexpectedly yielded encoded text");
+          }
+          yield chunk;
         }
       } finally {
         stream.destroy();

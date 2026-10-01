@@ -21,6 +21,7 @@ import type { OpenClawPluginToolContext } from "../plugins/types.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import { resolveApiKeyForProfile, resolveAuthProfileOrder } from "./auth-profiles.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
+import { resolveExecutionWorkspace } from "./execution-workspace.js";
 import {
   createRuntimeProviderAuthLookup,
   hasRuntimeAvailableProviderAuth,
@@ -311,22 +312,28 @@ export function resolveOpenClawPluginToolsForOptions(params: {
             owner.agentAccountId,
             owner.requesterSenderId ?? "local-owner",
           ]),
-          bridge: options.sandboxed ? options.sandboxFsBridge : undefined,
-          cwd: options.sandboxed ? options.sandboxContainerWorkdir : undefined,
+          workspace: resolveExecutionWorkspace({
+            owner: JSON.stringify([
+              owner.agentId,
+              owner.sessionId,
+              owner.sessionKey,
+              owner.messageChannel,
+              owner.agentAccountId,
+              owner.requesterSenderId ?? "local-owner",
+            ]),
+            sandboxed: options.sandboxed,
+            bridge: options.sandboxFsBridge,
+            cwd: options.sandboxContainerWorkdir,
+            config: availabilityConfig?.tools?.executionWorkspace,
+          }),
           limits: availabilityConfig?.tools?.artifacts,
           registerRunCleanup: options.registerRunCleanup,
           isCurrent: () => getActivePluginRegistryVersion() === registryVersion,
         })
       : undefined;
-  const sandboxFiles =
-    files &&
-    options?.sandboxed &&
-    options.sandboxFsBridge?.createFileExclusiveStream &&
-    options.sandboxFsBridge?.readFileStream &&
-    options.sandboxContainerWorkdir
-      ? files
-      : undefined;
-  if (sandboxFiles) {
+  const workspaceFiles =
+    files && files.capabilities?.materialize && files.capabilities?.export ? files : undefined;
+  if (workspaceFiles) {
     existingToolNames.add("artifact_materialize");
     existingToolNames.add("artifact_export");
   }
@@ -368,5 +375,5 @@ export function resolveOpenClawPluginToolsForOptions(params: {
     }),
   );
 
-  return [...(sandboxFiles ? createArtifactTools(sandboxFiles) : []), ...pluginTools];
+  return [...(workspaceFiles ? createArtifactTools(workspaceFiles) : []), ...pluginTools];
 }

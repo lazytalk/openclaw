@@ -418,6 +418,8 @@ export type AgentToolsConfig = {
 };
 
 export type ToolsConfig = {
+  /** Host workspace access is explicit opt-in; sandbox remains preferred. No configurable root. */
+  executionWorkspace?: { mode?: "sandbox" | "restricted-host" };
   /** Host-wide ephemeral managed-artifact quotas (bytes, count, and active transfers). */
   artifacts?: {
     maxBytes?: number;

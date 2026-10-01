@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createPluginToolFiles } from "./plugin-tool-files.js";
+import { cleanupExpiredPluginArtifacts, createPluginToolFiles } from "./plugin-tool-files.js";
 import { createSandboxFsBridgeFromResolver } from "./test-helpers/host-sandbox-fs-bridge.js";
 
 // These boundary tests use the real media store and filesystem. The injected
@@ -22,6 +22,7 @@ describe("managed plugin artifact boundary", () => {
       await cleanup("test complete");
     }
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000 + 1);
+    await cleanupExpiredPluginArtifacts();
     vi.useRealTimers();
     vi.unstubAllEnvs();
     await fs.rm(root, { recursive: true, force: true });
@@ -296,5 +297,58 @@ describe("managed plugin artifact boundary", () => {
     };
     expect(await walk(path.join(root, "sandbox"))).toEqual([]);
     expect(await read(files, artifact.artifactRef)).toHaveLength(128 * 1024);
+  });
+  it("drains materialization before workspace cleanup and releases its reserved capacity", async () => {
+    let runCleanup!: (reason: string) => Promise<void>;
+    let cleaning: Promise<void> | undefined;
+    let created = false;
+    const events: string[] = [];
+    const files = createPluginToolFiles({
+      owner: "race-owner",
+      limits: { maxBytes: 4, totalBytes: 12 },
+      workspace: {
+        backend: "restricted-host",
+        async create(_fileName, stream) {
+          for await (const _chunk of stream) {
+            /* consume the verified snapshot before closing the run */
+          }
+          cleaning = runCleanup("run closed during materialization");
+          created = true;
+          return "/generated/materialization.bin";
+        },
+        async *read() {
+          yield Buffer.alloc(0);
+        },
+        async remove() {
+          if (!created) {
+            throw new Error("workspace already reclaimed");
+          }
+          events.push("remove materialization");
+          created = false;
+        },
+        async cleanup() {
+          events.push("cleanup workspace");
+          created = false;
+        },
+      },
+      registerRunCleanup(cleanup) {
+        runCleanup = cleanup;
+        cleanups.push(cleanup);
+      },
+    });
+    const artifact = await files.importStream({
+      stream: chunks(Buffer.alloc(4)),
+      fileName: "source.bin",
+    });
+    await expect(files.materialize({ artifactRef: artifact.artifactRef })).rejects.toThrow();
+    expect(cleaning).toBeDefined();
+    await cleaning;
+    expect(events).toEqual(["remove materialization", "cleanup workspace"]);
+    const next = capability("race-owner", false, { maxBytes: 12, totalBytes: 12 });
+    await next.remove!({ artifactRef: artifact.artifactRef });
+    expect(
+      (await next.importStream({ stream: chunks(Buffer.alloc(12)), fileName: "capacity.bin" }))
+        .size,
+    ).toBe(12);
   });
 });

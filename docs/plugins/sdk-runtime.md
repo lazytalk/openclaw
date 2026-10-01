@@ -1188,9 +1188,15 @@ run cleanup scope. Runtimes without that lifecycle contract omit the capability.
 - `openStream({ artifactRef, signal? })` returns metadata and a byte stream after
   verifying a bounded snapshot against the recorded size and SHA-256.
 - `materialize({ artifactRef, signal? })` exclusively creates a generated path in
-  the current sandbox and returns `{ sandboxPath, size }`.
-- `export({ sandboxPath, fileName?, contentType?, maxBytes?, signal? })` captures a
-  regular file inside the active sandbox workspace and returns artifact metadata.
+  the active execution workspace and returns `{ workspacePath, sandboxPath, size }`.
+  `sandboxPath` remains a compatibility alias.
+- `export({ workspacePath?, sandboxPath?, fileName?, contentType?, maxBytes?, signal? })`
+  captures a regular file confined to the active execution workspace. Supply one
+  path field; the legacy `sandboxPath` input remains supported.
+- `copyMaterialized({ workspacePath, signal? })` streams a confined file to a new
+  generated workspace path, returning the same path metadata as materialization.
+- `removeMaterialized({ workspacePath })` removes a confined workspace file.
+- `remove({ artifactRef })` removes an owned managed artifact.
 
 Metadata contains `artifactRef`, `fileName`, `contentType`, `size`, `sha256`, and
 `expiresAt` (Unix epoch milliseconds). Return only this metadata from tools;
@@ -1206,7 +1212,8 @@ the plugin registry generation changes. Import the source again after expiry.
 
 Managed transfers use 64 KiB chunks with backpressure. The host defaults to
 512 MiB per file, 2 GiB of reserved storage (including private verification
-snapshots), 128 artifacts/pending imports, and four active transfers. Configure
+snapshots and generated materializations), 128 artifacts/pending imports, and
+four active transfers. Configure
 the generic `tools.artifacts` object in `openclaw.json`:
 
 ```json
@@ -1228,12 +1235,38 @@ Imports reserve their requested maximum until completion, then retain only their
 actual size. Quotas are shared across owners in the host process. Private open
 streams retain a transfer and storage lease until consumed, cancelled, or closed
 by run cleanup. Consume streams promptly rather than retaining unused streams.
+Materialization additionally reserves the source size until removal or run
+cleanup; repeated materializations and copies consume the same aggregate byte
+budget. A copy temporarily needs capacity for its captured artifact, verification
+snapshot and destination. This accounts for managed operations, not arbitrary
+growth by host processes editing workspace files; it is not an OS disk quota.
 
-`ctx.files.capabilities` advertises `contractVersion: 2`, `streaming: true`, and
-the effective limits. The `health` gateway RPC exposes the host contract under
-`managedArtifacts`; this does not assert that a specific run has `ctx.files` or
-a sandbox. Feature-detect `ctx.files` in the tool factory and inspect
-`tools.effective` for session-specific sandbox tools.
+`ctx.files.capabilities` exposes this run-specific descriptor:
+
+```typescript
+{
+  contractVersion: 2,
+  streaming: true,
+  maxBytes: 536870912,
+  totalBytes: 2147483648,
+  maxArtifacts: 128,
+  maxConcurrentTransfers: 4,
+  materialize: true,
+  export: true,
+  backend: "sandbox", // "sandbox" | "restricted-host" | "unavailable"
+  runtimeIdentity: { version: "...", buildId: "..." },
+  signature: "..." // SHA-256 of the descriptor before adding signature
+}
+```
+
+The `health` gateway RPC exposes storage capabilities under `managedArtifacts`.
+Its backend is deliberately `unavailable` and workspace flags are false: a
+gateway storage descriptor cannot prove a particular run has an execution
+workspace. Feature-detect methods as well as the descriptor. Older builds may
+omit the descriptor entirely. Missing or incompatible artifact support should
+disable individual artifact actions rather than prevent plugin registration.
+Cache verification only against the exact version, build identity, API version,
+signature, backend and effective limits; invalidate it when any of those change.
 
 `openStream` incrementally verifies SHA-256 and exact size while copying to a
 private disk snapshot. It opens that verified snapshot, unlinks its storage
@@ -1249,10 +1282,42 @@ reservations. Artifacts are deleted after expiry; the outbound-media retention
 sweep clears files orphaned by a process exit. A host crash or forced process kill
 can leave staging data until cleanup; provision disk for the configured budget.
 
-`artifact_materialize` and `artifact_export` are available in the coding file
-tool group when the active sandbox backend supports streaming reads and exclusive
-streaming creation. They
-respect the existing tool allow/deny policy and sandbox filesystem guards. No
-host-path fallback is provided; import/open remain available without a sandbox.
-Materialization creates a fresh file, never overwrites an existing one, and
-export takes a new snapshot so later sandbox edits do not change upload bytes.
+`artifact_materialize` and `artifact_export` use a generic
+`ExecutionWorkspaceBridge`. The existing sandbox APIs remain supported. A safe
+sandbox with streaming reads and exclusive streaming creation takes precedence.
+Import/open remain available independently of workspace support.
+
+Host-running agents can explicitly opt in:
+
+```json
+{
+  "tools": {
+    "executionWorkspace": { "mode": "restricted-host" }
+  }
+}
+```
+
+`tools.executionWorkspace.mode` defaults to `"sandbox"`; the only other value
+is `"restricted-host"`. With no sandbox and no opt-in, materialize/export are
+unavailable. An active sandbox lacking a safe bridge does not fall back to host.
+OpenClaw generates roots under its state directory at
+`runtime-workspaces/<SHA256-owner>/<random-run>/`. Neither the model nor config
+chooses a host root. The persistent agent workspace is excluded.
+
+The restricted host bridge rejects traversal, absolute escapes, symlinks and
+paths outside the current run root. It is a file capability boundary, not a
+process sandbox: host shell permissions still require separate execution policy.
+Restricted-host cleanup aborts workspace operations and waits for active writes
+to settle before deleting the run tree and releasing its materialization budget.
+Generated roots carry a process lease. Before provisioning a host workspace,
+OpenClaw reaps generated roots whose recorded process is dead; live processes
+keep their roots even during long runs. Crash reclamation therefore happens on
+the next host provisioning, not on a fixed TTL. Nonempty roots without a readable
+lease are retained; malformed leases and a maintenance scan exceeding 1024
+owner/run entries require administrator cleanup. PID reuse by another live
+process can conservatively retain a stale root. Review retained state rather
+than deleting a live owner's workspace.
+
+Workspace files are removed when the run closes. Existing tool allow/deny policy
+still applies. Materialization never overwrites an existing file; export takes
+a new immutable snapshot so later edits cannot change upload bytes.

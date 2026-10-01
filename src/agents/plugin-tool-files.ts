@@ -2,9 +2,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type { ToolsConfig } from "../config/types.tools.js";
+import { FsSafeError } from "../infra/fs-safe.js";
 import { deleteMediaBuffer, openMediaStream, saveMediaStream } from "../media/store.js";
 import type { PluginArtifact, PluginToolFiles } from "../plugins/tool-files.types.js";
+import { artifactCapabilities } from "./artifact-capabilities.js";
 import { resolveArtifactLimits } from "./artifact-limits.js";
+import { sandboxExecutionWorkspace, type ExecutionWorkspaceBridge } from "./execution-workspace.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.types.js";
 const TTL_MS = 60 * 60 * 1000;
 const SUBDIR = "outbound";
@@ -15,11 +18,11 @@ let pendingImports = 0;
 let activeTransfers = 0;
 
 function artifactName(value: string): string {
-  const hasControlCharacter = [...value].some((character) => character.charCodeAt(0) < 32);
+  const hasControlCharacter = Array.from(value).some((character) => character.charCodeAt(0) < 32);
   if (
     !value ||
     value.length > 200 ||
-    /[\\/]/u.test(value) ||
+    /[\\/:]/u.test(value) ||
     hasControlCharacter ||
     value === "." ||
     value === ".."
@@ -34,9 +37,27 @@ async function expireArtifact(ref: string): Promise<void> {
   if (!entry) {
     return;
   }
-  artifacts.delete(ref);
-  reservedBytes -= entry.metadata.size;
-  await deleteMediaBuffer(entry.id, SUBDIR);
+  try {
+    await deleteMediaBuffer(entry.id, SUBDIR);
+  } catch (error) {
+    // Concurrent TTL/explicit release can remove the same backing file first.
+    if (!(error instanceof FsSafeError && error.code === "not-found")) {
+      throw error;
+    }
+  }
+  if (artifacts.get(ref) === entry) {
+    artifacts.delete(ref);
+    reservedBytes -= entry.metadata.size;
+  }
+}
+
+/** Await disk reclamation before retiring capacity; also retries failed TTL cleanup. */
+export async function cleanupExpiredPluginArtifacts(): Promise<void> {
+  await Promise.all(
+    [...artifacts]
+      .filter(([, entry]) => entry.metadata.expiresAt <= Date.now())
+      .map(([ref]) => expireArtifact(ref)),
+  );
 }
 
 async function* abortableChunks(stream: AsyncIterable<Uint8Array>, signal: AbortSignal) {
@@ -46,7 +67,12 @@ async function* abortableChunks(stream: AsyncIterable<Uint8Array>, signal: Abort
       signal.throwIfAborted();
       let abort = () => {};
       const cancelled = new Promise<never>((_, reject) => {
-        abort = () => reject(signal.reason);
+        abort = () =>
+          reject(
+            signal.reason instanceof Error
+              ? signal.reason
+              : new Error("Artifact transfer cancelled"),
+          );
         signal.addEventListener("abort", abort, { once: true });
       });
       let next: IteratorResult<Uint8Array>;
@@ -74,15 +100,33 @@ export function createPluginToolFiles(params: {
   limits?: ToolsConfig["artifacts"];
   bridge?: SandboxFsBridge;
   cwd?: string;
+  workspace?: ExecutionWorkspaceBridge;
   registerRunCleanup: (cleanup: (reason: string) => Promise<void>) => void;
   isCurrent?: () => boolean;
 }): PluginToolFiles {
   const limits = resolveArtifactLimits(params.limits);
+  const workspace =
+    params.workspace ??
+    (params.bridge && params.cwd
+      ? sandboxExecutionWorkspace(params.bridge, params.cwd)
+      : undefined);
   const lifetime = new AbortController();
   const disposers = new Set<() => Promise<void>>();
+  const materialized = new Map<string, number>();
+  const materializations = new Set<Promise<void>>();
   params.registerRunCleanup(async () => {
     lifetime.abort();
-    await Promise.all([...disposers].map((dispose) => dispose()));
+    // Drain the full operation, including quota publication, before deleting its backend.
+    await Promise.allSettled(materializations);
+    try {
+      await Promise.all([...disposers].map((dispose) => dispose()));
+    } finally {
+      await workspace?.cleanup();
+      for (const bytes of materialized.values()) {
+        reservedBytes -= bytes;
+      }
+      materialized.clear();
+    }
   });
   const byteLimit = (value = limits.maxBytes) => {
     if (!Number.isSafeInteger(value) || value < 1 || value > limits.maxBytes) {
@@ -209,8 +253,10 @@ export function createPluginToolFiles(params: {
     }
   };
   const files: PluginToolFiles = {
-    capabilities: limits,
+    capabilities: artifactCapabilities(params.limits, workspace),
     async importStream(input) {
+      assertActive(input.signal);
+      await cleanupExpiredPluginArtifacts();
       assertActive(input.signal);
       const maxBytes = byteLimit(input.maxBytes);
       const fileName = artifactName(input.fileName);
@@ -282,89 +328,114 @@ export function createPluginToolFiles(params: {
       return { ...entry.metadata, stream };
     },
     async materialize(input) {
-      assertActive(input.signal);
-      const bridge = params.bridge;
-      if (!bridge || !params.cwd) {
-        throw new Error("Active sandbox required for materialization");
-      }
-      const create = bridge.createFileExclusiveStream;
-      if (!create) {
-        throw new Error("Sandbox backend does not support exclusive artifact creation");
-      }
-      const { entry, stream, dispose } = await snapshot(input.artifactRef, input.signal);
-      const filePath = path.posix.join(
-        ".openclaw-artifacts",
-        randomUUID(),
-        entry.metadata.fileName,
-      );
-      let result: "created" | "exists";
+      let finish = () => {};
+      const settled = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      materializations.add(settled);
       try {
-        result = await create.call(bridge, {
-          filePath,
-          cwd: params.cwd,
-          stream,
-          mkdir: true,
-          signal: signalFor(input.signal),
-        });
-      } finally {
-        await dispose();
-      }
-      if (result === "created") {
+        assertActive(input.signal);
+        if (!workspace) {
+          throw new Error(
+            "Active execution workspace required for materialization; sandbox required unless restricted-host is explicitly enabled",
+          );
+        }
+        const { entry, stream, dispose } = await snapshot(input.artifactRef, input.signal);
+        let filePath: string;
+        if (reservedBytes + entry.metadata.size > limits.totalBytes) {
+          await dispose();
+          throw new Error("Managed artifact workspace capacity reached");
+        }
+        reservedBytes += entry.metadata.size;
+        try {
+          filePath = await workspace.create(
+            entry.metadata.fileName,
+            stream,
+            signalFor(input.signal),
+          );
+          materialized.set(filePath, entry.metadata.size);
+        } catch (error) {
+          reservedBytes -= entry.metadata.size;
+          throw error;
+        } finally {
+          await dispose();
+        }
         try {
           assertActive(input.signal);
         } catch (error) {
-          await bridge.remove({ filePath, cwd: params.cwd, force: true });
+          await workspace.remove(filePath);
+          reservedBytes -= materialized.get(filePath) ?? 0;
+          materialized.delete(filePath);
           throw error;
         }
+        return {
+          sandboxPath: filePath,
+          workspacePath: filePath,
+          backend: workspace.backend,
+          size: entry.metadata.size,
+        };
+      } finally {
+        finish();
+        materializations.delete(settled);
       }
-      if (result !== "created") {
-        throw new Error("Artifact destination already exists; retry materialization");
-      }
-      return {
-        sandboxPath: bridge.resolvePath({ filePath, cwd: params.cwd }).containerPath,
-        size: entry.metadata.size,
-      };
     },
     async export(input) {
       assertActive(input.signal);
       const maxBytes = byteLimit(input.maxBytes);
-      const bridge = params.bridge;
-      if (!bridge || !params.cwd) {
-        throw new Error("Active sandbox required for export");
+      if (!workspace) {
+        throw new Error(
+          "Active execution workspace required for export; sandbox required unless restricted-host is explicitly enabled",
+        );
       }
-      const resolved = bridge.resolvePath({ filePath: input.sandboxPath, cwd: params.cwd });
-      const relative = path.posix.relative(params.cwd, resolved.containerPath);
+      const filePath = input.workspacePath ?? input.sandboxPath;
       if (
-        !relative ||
-        relative === ".." ||
-        relative.startsWith("../") ||
-        path.posix.isAbsolute(relative)
+        !filePath ||
+        (input.workspacePath && input.sandboxPath && input.workspacePath !== input.sandboxPath)
       ) {
-        throw new Error("Artifact export must stay inside the active sandbox workspace");
+        throw new Error("Supply one execution workspace path");
       }
-      if (!bridge.readFileStream) {
-        throw new Error("Sandbox backend does not support streaming artifact reads");
-      }
-      const read = bridge.readFileStream;
-      const cwd = params.cwd;
       const signal = signalFor(input.signal);
-      async function* streamSource() {
-        const source = await read.call(bridge, {
-          filePath: resolved.containerPath,
-          cwd,
-          maxBytes,
-          signal,
-        });
-        yield* source;
-      }
-      const stream = streamSource();
       return files.importStream({
-        stream,
-        fileName: input.fileName ?? path.posix.basename(resolved.containerPath),
+        stream: workspace.read(filePath, maxBytes, signal),
+        fileName: input.fileName ?? path.posix.basename(filePath.replace(/\\/gu, "/")),
         contentType: input.contentType,
         maxBytes,
         signal: input.signal,
       });
+    },
+    async remove(input) {
+      lookup(input.artifactRef);
+      await expireArtifact(input.artifactRef);
+    },
+    async removeMaterialized(input) {
+      assertActive();
+      if (!workspace) {
+        throw new Error("Active execution workspace required");
+      }
+      await workspace.remove(input.workspacePath);
+      reservedBytes -= materialized.get(input.workspacePath) ?? 0;
+      materialized.delete(input.workspacePath);
+    },
+    async copyMaterialized(input) {
+      assertActive(input.signal);
+      if (!workspace) {
+        throw new Error("Active execution workspace required");
+      }
+      // Capture into an immutable artifact first; this also reserves copy capacity.
+      const temporary = await files.export({
+        workspacePath: input.workspacePath,
+        fileName: "artifact-copy.bin",
+        signal: input.signal,
+      });
+      try {
+        const copied = await files.materialize({
+          artifactRef: temporary.artifactRef,
+          signal: input.signal,
+        });
+        return { workspacePath: copied.workspacePath!, sandboxPath: copied.sandboxPath };
+      } finally {
+        await expireArtifact(temporary.artifactRef);
+      }
     },
   };
   return files;

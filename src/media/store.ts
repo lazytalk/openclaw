@@ -723,6 +723,10 @@ export async function openMediaStream(
   signal?.throwIfAborted();
   const relativePath = resolveMediaRelativePath(id, subdir, "openMediaStream");
   const opened = await openMediaStore(maxBytes).open(relativePath);
+  if (signal?.aborted) {
+    await opened.handle.close();
+    signal.throwIfAborted();
+  }
   if (!opened.stat.isFile() || opened.stat.size > maxBytes) {
     await opened.handle.close();
     throw new Error("Managed media file exceeds byte limit or is not a regular file");
