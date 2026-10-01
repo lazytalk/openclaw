@@ -713,6 +713,57 @@ export async function resolveMediaBufferPath(id: string, subdir = "inbound"): Pr
   }
 }
 
+/** Opens a guarded descriptor and yields bounded chunks; callers must close unused streams. */
+export async function openMediaStream(
+  id: string,
+  subdir = "inbound",
+  maxBytes = MAX_BYTES,
+  signal?: AbortSignal,
+) {
+  signal?.throwIfAborted();
+  const relativePath = resolveMediaRelativePath(id, subdir, "openMediaStream");
+  const opened = await openMediaStore(maxBytes).open(relativePath);
+  if (!opened.stat.isFile() || opened.stat.size > maxBytes) {
+    await opened.handle.close();
+    throw new Error("Managed media file exceeds byte limit or is not a regular file");
+  }
+  let closed = false;
+  const close = async () => {
+    if (!closed) {
+      closed = true;
+      signal?.removeEventListener("abort", abort);
+      await opened.handle.close();
+    }
+  };
+  const abort = () => {
+    void close().catch(() => undefined);
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  async function* stream() {
+    let position = 0;
+    try {
+      while (true) {
+        signal?.throwIfAborted();
+        const bytes = Buffer.allocUnsafe(64 * 1024);
+        const { bytesRead } = await opened.handle.read(bytes, 0, bytes.length, position);
+        if (!bytesRead) {
+          break;
+        }
+        position += bytesRead;
+        if (position > maxBytes) {
+          throw new Error("Managed media stream exceeds byte limit");
+        }
+        yield bytes.subarray(0, bytesRead);
+      }
+      signal?.throwIfAborted();
+    } finally {
+      signal?.removeEventListener("abort", abort);
+      await close();
+    }
+  }
+  return { stream: stream(), close, size: opened.stat.size };
+}
+
 /** Read result for callers that need media bytes plus the resolved file path. */
 type ReadMediaBufferResult = {
   id: string;

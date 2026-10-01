@@ -28,6 +28,21 @@ export type SandboxFsBridge = {
     signal?: AbortSignal;
     maxBytes?: number;
   }): Promise<Buffer>;
+  /** Bounded, guarded descriptor reads. Backends without streaming omit this capability. */
+  readFileStream?(params: {
+    filePath: string;
+    cwd?: string;
+    signal?: AbortSignal;
+    maxBytes: number;
+  }): Promise<AsyncIterable<Uint8Array>>;
+  /** Atomic no-replace publication; failures must clean partial staging files. */
+  createFileExclusiveStream?(params: {
+    filePath: string;
+    cwd?: string;
+    stream: AsyncIterable<Uint8Array>;
+    mkdir?: boolean;
+    signal?: AbortSignal;
+  }): Promise<"created" | "exists">;
   /** Streams a regular file within the sandbox when the backend supports native copying. */
   copyFile?(params: {
     sourcePath: string;

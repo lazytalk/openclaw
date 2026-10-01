@@ -963,6 +963,15 @@ export const AgentEntrySchema = z
 
 export const ToolsSchema = z
   .object({
+    artifacts: z
+      .object({
+        maxBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+        totalBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+        maxArtifacts: z.number().int().positive().optional(),
+        maxConcurrentTransfers: z.number().int().positive().optional(),
+      })
+      .strict()
+      .optional(),
     ...CommonToolPolicyFields,
     web: ToolsWebSchema,
     github: GitHubToolIdentitySchema,

@@ -155,4 +155,50 @@ describe("sandbox fs bridge boundary validation", () => {
       });
     },
   );
+  it("reads a sparse file above 64 MiB through a guarded bounded stream", async () => {
+    await withTempDir("openclaw-streamed-read-", async (stateDir) => {
+      const workspaceDir = path.join(stateDir, "workspace");
+      await fs.mkdir(workspaceDir);
+      const size = 65 * 1024 * 1024 + 1;
+      const handle = await fs.open(path.join(workspaceDir, "large.bin"), "wx");
+      try {
+        await handle.truncate(size);
+      } finally {
+        await handle.close();
+      }
+      const bridge = createSandboxFsBridge({
+        sandbox: createSandbox({ workspaceDir, agentWorkspaceDir: workspaceDir }),
+      });
+      await expect(
+        bridge.readFileStream!({ filePath: "large.bin", maxBytes: size - 1 }),
+      ).rejects.toThrow("exceeds");
+      const stream = await bridge.readFileStream!({ filePath: "large.bin", maxBytes: size });
+      let count = 0;
+      for await (const chunk of stream) {
+        expect(chunk.byteLength).toBeLessThanOrEqual(64 * 1024);
+        count += chunk.byteLength;
+      }
+      expect(count).toBe(size);
+    });
+  });
+  it("cancels native guarded reads without exposing further chunks", async () => {
+    await withTempDir("openclaw-streamed-abort-", async (stateDir) => {
+      const workspaceDir = path.join(stateDir, "workspace");
+      await fs.mkdir(workspaceDir);
+      await fs.writeFile(path.join(workspaceDir, "cancel.bin"), Buffer.alloc(128 * 1024));
+      const bridge = createSandboxFsBridge({
+        sandbox: createSandbox({ workspaceDir, agentWorkspaceDir: workspaceDir }),
+      });
+      const controller = new AbortController();
+      const stream = await bridge.readFileStream!({
+        filePath: "cancel.bin",
+        maxBytes: 128 * 1024,
+        signal: controller.signal,
+      });
+      const iterator = stream[Symbol.asyncIterator]();
+      expect((await iterator.next()).done).toBe(false);
+      controller.abort();
+      await expect(iterator.next()).rejects.toThrow();
+    });
+  });
 });

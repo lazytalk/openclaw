@@ -1,8 +1,10 @@
-// Health gateway methods return cached or refreshed status summaries while
-// detecting stale channel runtime state against live gateway snapshots.
 import { isFutureDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
+// Health gateway methods return cached or refreshed status summaries while
+// detecting stale channel runtime state against live gateway snapshots.
+import { resolveArtifactLimits } from "../../agents/artifact-limits.js";
 import type { ChannelAccountSnapshot } from "../../channels/plugins/types.public.js";
+import { loadConfig } from "../../config/config.js";
 import { getStatusSummary } from "../../status/summary.js";
 import type { GatewayHotReloadStatus } from "../config-reload-status.types.js";
 import { buildContextEngineHealthSummary } from "../health/context-engine.js";
@@ -136,6 +138,7 @@ function mergeCachedHealthRuntimeState(params: {
 /** Gateway handlers for health snapshots and status summaries. */
 export const healthHandlers: GatewayRequestHandlers = {
   health: async ({ respond, context, params, client }) => {
+    const managedArtifacts = resolveArtifactLimits(loadConfig().tools?.artifacts);
     const { getHealthCache, refreshHealthSnapshot, logHealth } = context;
     const wantsProbe = params?.probe === true;
     const scopes = Array.isArray(client?.connect?.scopes) ? client.connect.scopes : [];
@@ -162,11 +165,14 @@ export const healthHandlers: GatewayRequestHandlers = {
     ) {
       respond(
         true,
-        mergeCachedHealthRuntimeState({
-          cached,
-          eventLoop: context.getEventLoopHealth?.(),
-          configReloadHotReloadStatus: context.getConfigReloaderHotReloadStatus?.(),
-        }),
+        {
+          ...mergeCachedHealthRuntimeState({
+            cached,
+            eventLoop: context.getEventLoopHealth?.(),
+            configReloadHotReloadStatus: context.getConfigReloaderHotReloadStatus?.(),
+          }),
+          managedArtifacts,
+        },
         undefined,
         { cached: true },
       );
@@ -179,7 +185,7 @@ export const healthHandlers: GatewayRequestHandlers = {
     }
     try {
       const snap = await refreshHealthSnapshot({ probe: wantsProbe, includeSensitive });
-      respond(true, snap, undefined);
+      respond(true, { ...snap, managedArtifacts }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
     }

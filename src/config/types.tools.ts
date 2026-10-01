@@ -418,6 +418,13 @@ export type AgentToolsConfig = {
 };
 
 export type ToolsConfig = {
+  /** Host-wide ephemeral managed-artifact quotas (bytes, count, and active transfers). */
+  artifacts?: {
+    maxBytes?: number;
+    totalBytes?: number;
+    maxArtifacts?: number;
+    maxConcurrentTransfers?: number;
+  };
   /** Base tool profile applied before allow/deny lists. */
   profile?: ToolProfileId;
   allow?: string[];

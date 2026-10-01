@@ -5,6 +5,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import { FsSafeError } from "../../infra/fs-safe.js";
 import type { PathAliasPolicy } from "../../infra/path-alias-guards.js";
 import { openRootFile, type RootFileOpenResult } from "./fs-bridge-path-safety.runtime.js";
@@ -63,7 +64,7 @@ type RunCommand = (
   script: string,
   options?: {
     args?: string[];
-    stdin?: Buffer | string;
+    stdin?: Buffer | string | Readable;
     allowFailure?: boolean;
     signal?: AbortSignal;
   },

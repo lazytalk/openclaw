@@ -313,6 +313,7 @@ export function resolveOpenClawPluginToolsForOptions(params: {
           ]),
           bridge: options.sandboxed ? options.sandboxFsBridge : undefined,
           cwd: options.sandboxed ? options.sandboxContainerWorkdir : undefined,
+          limits: availabilityConfig?.tools?.artifacts,
           registerRunCleanup: options.registerRunCleanup,
           isCurrent: () => getActivePluginRegistryVersion() === registryVersion,
         })
@@ -320,7 +321,8 @@ export function resolveOpenClawPluginToolsForOptions(params: {
   const sandboxFiles =
     files &&
     options?.sandboxed &&
-    options.sandboxFsBridge?.createFileExclusive &&
+    options.sandboxFsBridge?.createFileExclusiveStream &&
+    options.sandboxFsBridge?.readFileStream &&
     options.sandboxContainerWorkdir
       ? files
       : undefined;

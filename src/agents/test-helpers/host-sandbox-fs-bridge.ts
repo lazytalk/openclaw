@@ -34,6 +34,67 @@ export function createSandboxFsBridgeFromResolver(
       }
       return fs.readFile(target.hostPath);
     },
+    readFileStream: async ({ filePath, cwd, maxBytes, signal }) => {
+      const target = resolvePath(filePath, cwd);
+      if (!target.hostPath) {
+        throw new Error("Expected hostPath");
+      }
+      const handle = await fs.open(target.hostPath, "r");
+      async function* stream() {
+        let size = 0;
+        try {
+          while (true) {
+            signal?.throwIfAborted();
+            const buffer = Buffer.allocUnsafe(64 * 1024);
+            const { bytesRead } = await handle.read(buffer);
+            if (!bytesRead) {
+              break;
+            }
+            size += bytesRead;
+            if (size > maxBytes) {
+              throw new Error("File exceeds byte limit");
+            }
+            yield buffer.subarray(0, bytesRead);
+          }
+        } finally {
+          await handle.close();
+        }
+      }
+      return stream();
+    },
+    createFileExclusiveStream: async ({ filePath, cwd, stream, mkdir = true, signal }) => {
+      const target = resolvePath(filePath, cwd);
+      if (!target.hostPath) {
+        throw new Error("Expected hostPath");
+      }
+      if (mkdir) {
+        await fs.mkdir(path.dirname(target.hostPath), { recursive: true });
+      }
+      let handle;
+      try {
+        handle = await fs.open(target.hostPath, "wx");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+          return "exists";
+        }
+        throw error;
+      }
+      let completed = false;
+      try {
+        for await (const chunk of stream) {
+          signal?.throwIfAborted();
+          await handle.writeFile(chunk);
+        }
+        signal?.throwIfAborted();
+        completed = true;
+        return "created";
+      } finally {
+        await handle.close();
+        if (!completed) {
+          await fs.unlink(target.hostPath);
+        }
+      }
+    },
     writeFile: async ({ filePath, cwd, data, mkdir = true }) => {
       const target = resolvePath(filePath, cwd);
       if (!target.hostPath) {

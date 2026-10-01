@@ -1204,16 +1204,54 @@ expire on restart and cannot be exchanged between requesters in a shared chat.
 Retained capabilities and streams stop working when their owning run closes or
 the plugin registry generation changes. Import the source again after expiry.
 
-The host enforces a 64 MiB per-file limit, 256 MiB total reservation, and 128
-simultaneous artifacts/imports. A plugin may set a lower `maxBytes`; a higher
-value is rejected. Imports stream to managed storage. Integrity verification,
-sandbox reads, and sandbox writes currently use bounded in-memory snapshots
-because the sandbox filesystem bridge accepts buffers. This is not a fully
-streaming sandbox transport. Artifacts are deleted after expiry; the existing
-outbound-media retention sweep also clears files orphaned by a process exit.
+Managed transfers use 64 KiB chunks with backpressure. The host defaults to
+512 MiB per file, 2 GiB of reserved storage (including private verification
+snapshots), 128 artifacts/pending imports, and four active transfers. Configure
+the generic `tools.artifacts` object in `openclaw.json`:
+
+```json
+{
+  "tools": {
+    "artifacts": {
+      "maxBytes": 536870912,
+      "totalBytes": 2147483648,
+      "maxArtifacts": 128,
+      "maxConcurrentTransfers": 4
+    }
+  }
+}
+```
+
+All limits are positive safe integers; `totalBytes` must be at least `maxBytes`.
+A plugin may request a lower `maxBytes`; requests above the host ceiling fail.
+Imports reserve their requested maximum until completion, then retain only their
+actual size. Quotas are shared across owners in the host process. Private open
+streams retain a transfer and storage lease until consumed, cancelled, or closed
+by run cleanup. Consume streams promptly rather than retaining unused streams.
+
+`ctx.files.capabilities` advertises `contractVersion: 2`, `streaming: true`, and
+the effective limits. The `health` gateway RPC exposes the host contract under
+`managedArtifacts`; this does not assert that a specific run has `ctx.files` or
+a sandbox. Feature-detect `ctx.files` in the tool factory and inspect
+`tools.effective` for session-specific sandbox tools.
+
+`openStream` incrementally verifies SHA-256 and exact size while copying to a
+private disk snapshot. It opens that verified snapshot, unlinks its storage
+name, and streams its pinned descriptor; no bytes leave the host before
+verification completes and later source mutations cannot change upload bytes.
+Materialization and export use optional `createFileExclusiveStream` and
+`readFileStream` sandbox bridge primitives. Existing buffer methods remain
+compatible; backends that omit streaming primitives do not expose artifact
+sandbox tools. There is no buffer fallback for large sandbox transfers.
+
+Cancellation rejects suspended producers, cleans partial files, and releases
+reservations. Artifacts are deleted after expiry; the outbound-media retention
+sweep clears files orphaned by a process exit. A host crash or forced process kill
+can leave staging data until cleanup; provision disk for the configured budget.
 
 `artifact_materialize` and `artifact_export` are available in the coding file
-tool group when the active sandbox backend supports exclusive creation. They
+tool group when the active sandbox backend supports streaming reads and exclusive
+streaming creation. They
 respect the existing tool allow/deny policy and sandbox filesystem guards. No
 host-path fallback is provided; import/open remain available without a sandbox.
 Materialization creates a fresh file, never overwrites an existing one, and

@@ -37,6 +37,9 @@ export function createLocalRemoteShellScriptRunner(params?: {
 }): RemoteShellSandboxHandle["runRemoteShellScript"] {
   return async (command) => {
     params?.onCommand?.(command);
+    if (command.stdin && typeof command.stdin !== "string" && !Buffer.isBuffer(command.stdin)) {
+      throw new Error("The synchronous remote test runner does not support streaming stdin");
+    }
     const runsPinnedMutation = command.script.includes(PINNED_MUTATION_MARKER);
     const spawn = params?.spawn ?? spawnLocalRemoteShell;
     const result = runsPinnedMutation

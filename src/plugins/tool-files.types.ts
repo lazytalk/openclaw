@@ -10,6 +10,14 @@ export type PluginArtifact = Readonly<{
 
 /** Host-bound capability. Bytes never belong in tool results or model context. */
 export type PluginToolFiles = {
+  readonly capabilities?: Readonly<{
+    contractVersion: number;
+    streaming: boolean;
+    maxBytes: number;
+    totalBytes: number;
+    maxArtifacts: number;
+    maxConcurrentTransfers: number;
+  }>;
   importStream(params: {
     stream: AsyncIterable<Uint8Array>;
     fileName: string;

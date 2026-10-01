@@ -1,3 +1,4 @@
+import type { Readable } from "node:stream";
 /**
  * Backend-neutral sandbox runtime handle contracts.
  *
@@ -27,7 +28,7 @@ export type SandboxBackendPreparedWorkdirDiscarder = (workdir: string) => void;
 export type SandboxBackendCommandParams = {
   script: string;
   args?: string[];
-  stdin?: Buffer | string;
+  stdin?: Buffer | string | Readable;
   allowFailure?: boolean;
   signal?: AbortSignal;
 };

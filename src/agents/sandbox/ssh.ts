@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { Readable } from "node:stream";
 import { createAbortError } from "../../infra/abort-signal.js";
 import { resolveRootPath } from "../../infra/boundary-path.js";
 import { toErrorObject } from "../../infra/errors.js";
@@ -42,7 +43,7 @@ export type SshSandboxSession = {
 export type RunSshSandboxCommandParams = {
   session: SshSandboxSession;
   remoteCommand: string;
-  stdin?: Buffer | string;
+  stdin?: Buffer | string | Readable;
   allowFailure?: boolean;
   signal?: AbortSignal;
   tty?: boolean;

@@ -8,7 +8,7 @@ import { SANDBOX_COMMAND_MAX_BUFFER_BYTES } from "./constants.js";
 
 export type ExecContainerRawOptions = {
   allowFailure?: boolean;
-  input?: Buffer | string;
+  input?: Buffer | string | import("node:stream").Readable;
   signal?: AbortSignal;
 };
 

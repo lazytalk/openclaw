@@ -4,6 +4,7 @@
  * Resolves container paths to mounted host paths and executes guarded reads, writes, stats, renames, and deletes.
  */
 import fs from "node:fs";
+import { Readable } from "node:stream";
 import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { readFileDescriptorBoundedSync } from "../../infra/boundary-file-read.js";
 import type {
@@ -33,7 +34,7 @@ import type { SandboxWorkspaceAccess } from "./types.js";
 
 type RunCommandOptions = {
   args?: string[];
-  stdin?: Buffer | string;
+  stdin?: Buffer | string | Readable;
   allowFailure?: boolean;
   signal?: AbortSignal;
 };
@@ -83,6 +84,69 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
   }): Promise<Buffer> {
     const target = this.resolveResolvedPath(params);
     return this.readPinnedFile(target, params.maxBytes);
+  }
+
+  async readFileStream(params: {
+    filePath: string;
+    cwd?: string;
+    signal?: AbortSignal;
+    maxBytes: number;
+  }): Promise<AsyncIterable<Uint8Array>> {
+    params.signal?.throwIfAborted();
+    if (!Number.isSafeInteger(params.maxBytes) || params.maxBytes < 1) {
+      throw new RangeError("maxBytes must be a positive safe integer");
+    }
+    const target = this.resolveResolvedPath(params);
+    const opened = await this.pathGuard.openReadableFile(target);
+    const initial = fs.fstatSync(opened.fd);
+    if (!initial.isFile() || initial.size > params.maxBytes) {
+      fs.closeSync(opened.fd);
+      throw new RangeError(`File exceeds ${params.maxBytes} bytes`);
+    }
+    const stream = fs.createReadStream("", {
+      fd: opened.fd,
+      autoClose: true,
+      highWaterMark: 64 * 1024,
+      signal: params.signal,
+    });
+    async function* checked() {
+      let size = 0;
+      try {
+        for await (const chunk of stream) {
+          params.signal?.throwIfAborted();
+          size += chunk.length;
+          if (size > params.maxBytes) {
+            throw new RangeError(`File exceeds ${params.maxBytes} bytes`);
+          }
+          yield chunk as Buffer;
+        }
+      } finally {
+        stream.destroy();
+      }
+    }
+    return checked();
+  }
+
+  async createFileExclusiveStream(params: {
+    filePath: string;
+    cwd?: string;
+    stream: AsyncIterable<Uint8Array>;
+    mkdir?: boolean;
+    signal?: AbortSignal;
+  }): Promise<"created" | "exists"> {
+    const stream = Readable.from(params.stream, { objectMode: false, highWaterMark: 64 * 1024 });
+    // Cancellation can arrive during path checks before the child attaches its
+    // stream error handler. The command's AbortSignal still rejects the write.
+    stream.on("error", () => undefined);
+    const abort = () => stream.destroy(new Error("Artifact transfer cancelled"));
+    params.signal?.throwIfAborted();
+    params.signal?.addEventListener("abort", abort, { once: true });
+    try {
+      return await this.createFileExclusive({ ...params, data: stream });
+    } finally {
+      params.signal?.removeEventListener("abort", abort);
+      stream.destroy();
+    }
   }
 
   async copyFile(params: {
@@ -154,7 +218,7 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
   async createFileExclusive(params: {
     filePath: string;
     cwd?: string;
-    data: Buffer | string;
+    data: Buffer | string | Readable;
     encoding?: BufferEncoding;
     mkdir?: boolean;
     signal?: AbortSignal;
@@ -166,9 +230,10 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
       options: { action: "create files", requireWritable: true } as const,
     };
     await this.pathGuard.assertPathSafety(target, createCheck.options);
-    const buffer = Buffer.isBuffer(params.data)
-      ? params.data
-      : Buffer.from(params.data, params.encoding ?? "utf8");
+    const buffer =
+      Buffer.isBuffer(params.data) || params.data instanceof Readable
+        ? params.data
+        : Buffer.from(params.data, params.encoding ?? "utf8");
     const pinnedCreateTarget = await this.pathGuard.resolveAnchoredPinnedEntry(
       target,
       "create files",
@@ -358,7 +423,7 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
   }
 
   private async runCheckedCommand(
-    plan: SandboxFsCommandPlan & { stdin?: Buffer | string; signal?: AbortSignal },
+    plan: SandboxFsCommandPlan & { stdin?: Buffer | string | Readable; signal?: AbortSignal },
   ): Promise<SandboxBackendCommandResult> {
     await this.pathGuard.assertPathChecks(plan.checks);
     if (plan.recheckBeforeCommand) {

@@ -68,7 +68,11 @@ async function runLocalShellCommand(
     });
 
     if (child.stdin) {
-      child.stdin.end(params.stdin);
+      if (params.stdin && typeof params.stdin !== "string" && !Buffer.isBuffer(params.stdin)) {
+        params.stdin.pipe(child.stdin);
+      } else {
+        child.stdin.end(params.stdin);
+      }
     }
   });
 }

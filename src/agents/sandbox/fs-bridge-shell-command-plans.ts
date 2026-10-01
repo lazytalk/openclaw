@@ -1,3 +1,4 @@
+import type { Readable } from "node:stream";
 /**
  * Shell command plans for sandbox filesystem bridge operations.
  *
@@ -10,7 +11,7 @@ export type SandboxFsCommandPlan = {
   checks: PathSafetyCheck[];
   script: string;
   args?: string[];
-  stdin?: Buffer | string;
+  stdin?: Buffer | string | Readable;
   recheckBeforeCommand?: boolean;
   allowFailure?: boolean;
 };
