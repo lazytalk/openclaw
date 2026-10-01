@@ -66,8 +66,9 @@ const CORE_TOOL_SECTION_ORDER: Array<{ id: string; label: string }> = [
   { id: "agents", label: "Agents" },
   { id: "media", label: "Media" },
 ];
-
 const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
+  { id: "artifact_materialize", label: "artifact_materialize", description: "Copy a managed artifact into the sandbox", sectionId: "fs", profiles: ["coding"] },
+  { id: "artifact_export", label: "artifact_export", description: "Capture a sandbox file as a managed artifact", sectionId: "fs", profiles: ["coding"] },
   {
     id: "read",
     label: "read",

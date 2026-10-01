@@ -4,6 +4,7 @@ import type { ToolFsPolicy } from "../agents/tool-fs-policy.types.js";
 import type { AnyAgentTool } from "../agents/tools/common.js";
 import type { ConversationReadInvocationOrigin } from "../channels/plugins/conversation-read-origin.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { PluginToolFiles } from "./tool-files.types.js";
 import type { HookEntry } from "../hooks/types.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
 
@@ -12,7 +13,6 @@ export type OpenClawPluginActiveModelContext = {
   modelId?: string;
   modelRef?: string;
 };
-
 /** Current-turn outbound delivery capability bound to the host-selected route and media policy. */
 export type OpenClawPluginToolDelivery = {
   send: (params: { text?: string; mediaUrl?: string }) => Promise<void>;
@@ -27,6 +27,8 @@ export type OpenClawPluginToolContext = {
   getRuntimeConfig?: () => OpenClawConfig | undefined;
   /** Effective filesystem policy for the active tool run. */
   fsPolicy?: ToolFsPolicy;
+  /** Managed file capability, scoped to the current requester and run lifetime. */
+  files?: PluginToolFiles;
   workspaceDir?: string;
   agentDir?: string;
   agentId?: string;

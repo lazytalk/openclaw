@@ -31,9 +31,12 @@ import {
   resolveOpenClawPluginToolInputs,
   type OpenClawPluginToolOptions,
 } from "./openclaw-tools.plugin-context.js";
+import { createPluginToolFiles } from "./plugin-tool-files.js";
 import { getPreparedPluginRuntimeLoadContext } from "./prepared-model-runtime.plugin-context.js";
 import type { PreparedModelRuntimeSnapshot } from "./prepared-model-runtime.types.js";
+import type { SandboxFsBridge } from "./sandbox/fs-bridge.types.js";
 import { resolveAgentRuntimeToolConfig } from "./tool-runtime-config.js";
+import { createArtifactTools } from "./tools/artifact-tools.js";
 import type { AnyAgentTool } from "./tools/common.js";
 import { hasProviderAuthForTool } from "./tools/model-config.helpers.js";
 
@@ -44,6 +47,9 @@ type ResolveOpenClawPluginToolsOptions = OpenClawPluginToolOptions & {
   currentThreadTs?: string;
   currentMessageId?: string | number;
   sandboxRoot?: string;
+  sandboxFsBridge?: SandboxFsBridge;
+  sandboxContainerWorkdir?: string;
+  registerRunCleanup?: (cleanup: (reason: string) => Promise<void>) => void;
   modelHasVision?: boolean;
   modelProvider?: string;
   modelId?: string;
@@ -186,7 +192,6 @@ function createPluginToolDelivery(params: {
     },
   };
 }
-
 /** Resolves plugin tools and their delivery context for an agent run. */
 export function resolveOpenClawPluginToolsForOptions(params: {
   options?: ResolveOpenClawPluginToolsOptions;
@@ -289,11 +294,46 @@ export function resolveOpenClawPluginToolsForOptions(params: {
   const preparedModelRuntime = params.options?.preparedModelRuntime;
   const runtimeRegistry =
     getPluginRuntimeGatewayRequestScope()?.pluginRegistry ?? getActivePluginRegistry() ?? undefined;
+  const owner = pluginToolInputs.context;
+  const options = params.options;
+  const registryVersion = getActivePluginRegistryVersion();
+  const files =
+    options?.registerRunCleanup &&
+    owner.agentId &&
+    owner.sessionId &&
+    (owner.requesterSenderId || owner.senderIsOwner === true)
+      ? createPluginToolFiles({
+          owner: JSON.stringify([
+            owner.agentId,
+            owner.sessionId,
+            owner.sessionKey,
+            owner.messageChannel,
+            owner.agentAccountId,
+            owner.requesterSenderId ?? "local-owner",
+          ]),
+          bridge: options.sandboxed ? options.sandboxFsBridge : undefined,
+          cwd: options.sandboxed ? options.sandboxContainerWorkdir : undefined,
+          registerRunCleanup: options.registerRunCleanup,
+          isCurrent: () => getActivePluginRegistryVersion() === registryVersion,
+        })
+      : undefined;
+  const sandboxFiles =
+    files &&
+    options?.sandboxed &&
+    options.sandboxFsBridge?.createFileExclusive &&
+    options.sandboxContainerWorkdir
+      ? files
+      : undefined;
+  if (sandboxFiles) {
+    existingToolNames.add("artifact_materialize");
+    existingToolNames.add("artifact_export");
+  }
   const pluginTools = resolvePluginTools({
     ...pluginToolInputs,
     context: {
       ...pluginToolInputs.context,
       ...(delivery ? { delivery } : {}),
+      ...(files ? { files } : {}),
       ...(hasAuthForProvider ? { hasAuthForProvider } : {}),
       ...(resolveApiKeyForProvider ? { resolveApiKeyForProvider } : {}),
     },
@@ -326,5 +366,5 @@ export function resolveOpenClawPluginToolsForOptions(params: {
     }),
   );
 
-  return pluginTools;
+  return [...(sandboxFiles ? createArtifactTools(sandboxFiles) : []), ...pluginTools];
 }

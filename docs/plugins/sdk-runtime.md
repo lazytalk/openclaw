@@ -1174,3 +1174,47 @@ Beyond `api.runtime`, the API object also provides:
 - [Plugin internals](/plugins/architecture) — capability model and registry
 - [SDK entry points](/plugins/sdk-entrypoints) — `definePluginEntry` options
 - [SDK overview](/plugins/sdk-overview) — subpath reference
+
+## Managed files in agent tools
+
+Tool factories can use the optional `ctx.files` capability to exchange binary
+files without returning base64 or host paths to the model. Feature-detect this
+capability before registering artifact-dependent actions. It requires a trusted
+requester (or explicit owner), an agent and session identity, and a host-owned
+run cleanup scope. Runtimes without that lifecycle contract omit the capability.
+
+- `importStream({ stream, fileName, contentType?, maxBytes?, signal? })` accepts an
+  async iterable of byte chunks and returns immutable artifact metadata.
+- `openStream({ artifactRef, signal? })` returns metadata and a byte stream after
+  verifying a bounded snapshot against the recorded size and SHA-256.
+- `materialize({ artifactRef, signal? })` exclusively creates a generated path in
+  the current sandbox and returns `{ sandboxPath, size }`.
+- `export({ sandboxPath, fileName?, contentType?, maxBytes?, signal? })` captures a
+  regular file inside the active sandbox workspace and returns artifact metadata.
+
+Metadata contains `artifactRef`, `fileName`, `contentType`, `size`, `sha256`, and
+`expiresAt` (Unix epoch milliseconds). Return only this metadata from tools;
+consume `stream` inside the plugin. Upload approval should bind the artifact
+reference, size, digest, and destination, then verify that binding immediately
+before upload. The host file capability does not authorize remote mutations.
+
+References are scoped to the agent, session UUID/key, channel, account, and
+requester. They survive turns for one hour in the same running process. They
+expire on restart and cannot be exchanged between requesters in a shared chat.
+Retained capabilities and streams stop working when their owning run closes or
+the plugin registry generation changes. Import the source again after expiry.
+
+The host enforces a 64 MiB per-file limit, 256 MiB total reservation, and 128
+simultaneous artifacts/imports. A plugin may set a lower `maxBytes`; a higher
+value is rejected. Imports stream to managed storage. Integrity verification,
+sandbox reads, and sandbox writes currently use bounded in-memory snapshots
+because the sandbox filesystem bridge accepts buffers. This is not a fully
+streaming sandbox transport. Artifacts are deleted after expiry; the existing
+outbound-media retention sweep also clears files orphaned by a process exit.
+
+`artifact_materialize` and `artifact_export` are available in the coding file
+tool group when the active sandbox backend supports exclusive creation. They
+respect the existing tool allow/deny policy and sandbox filesystem guards. No
+host-path fallback is provided; import/open remain available without a sandbox.
+Materialization creates a fresh file, never overwrites an existing one, and
+export takes a new snapshot so later sandbox edits do not change upload bytes.
