@@ -81,7 +81,7 @@ describe("managed plugin artifact boundary", () => {
       capability("agent/session/bob").openStream({ artifactRef: artifact.artifactRef }),
     ).rejects.toThrow("unavailable");
     const retained = await files.openStream({ artifactRef: artifact.artifactRef });
-    await cleanups[0]("finished");
+    await cleanups[0]!("finished");
     await expect(retained.stream[Symbol.asyncIterator]().next()).rejects.toThrow();
     await expect(files.openStream({ artifactRef: artifact.artifactRef })).rejects.toThrow();
     expect(await read(capability(), artifact.artifactRef)).toEqual(
@@ -93,7 +93,8 @@ describe("managed plugin artifact boundary", () => {
     const artifact = await files.importStream({ stream: chunks(), fileName: "file.bin" });
     const directory = path.join(root, "media", "outbound");
     const [stored] = await fs.readdir(directory);
-    await fs.writeFile(path.join(directory, stored), Buffer.from("changed"));
+    expect(stored).toBeDefined();
+    await fs.writeFile(path.join(directory, stored!), Buffer.from("changed"));
     await expect(files.openStream({ artifactRef: artifact.artifactRef })).rejects.toThrow(
       "integrity",
     );
@@ -128,7 +129,7 @@ describe("managed plugin artifact boundary", () => {
     const files = capability();
     async function* interrupted() {
       yield Buffer.from("first");
-      await cleanups[0]("cancelled");
+      await cleanups[0]!("cancelled");
       yield Buffer.from("last");
     }
     await expect(
