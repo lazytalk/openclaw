@@ -170,18 +170,8 @@ type SessionStoreAvailabilityRead = ReturnType<
   typeof resolveExistingAgentSessionStoreTargetsReadOnlyResult
 >;
 
-export type ManagedOutgoingMediaArtifactDownload = {
-  artifactId: string;
-  sessionKey: string;
-  type: Exclude<ManagedMediaKind, "document"> | "file";
-  title: string;
-  mimeType?: string;
-  sizeBytes?: number;
-  /** Discovery classification, kept stable across list/get/download. */
-  source: "session-resource" | "session-transcript";
-  url: string;
-  expiresAt: string;
-};
+import type { ManagedOutgoingMediaArtifactDownload } from "./managed-outgoing-media-artifact-download.types.js";
+export type { ManagedOutgoingMediaArtifactDownload };
 
 function resolveManagedImageAttachmentLimits(
   config?: ManagedImageAttachmentLimitsConfig | null,

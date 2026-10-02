@@ -31,7 +31,6 @@ import {
   insertManagedImageRecordWithFile,
   resolveManagedImageOriginalPath,
 } from "./managed-image-attachments.custody.js";
-import type { ManagedOutgoingMediaArtifactDownload } from "./managed-image-attachments.js";
 import {
   resolveManagedMediaKind,
   type ManagedMediaKind,
@@ -49,10 +48,11 @@ import {
   buildOutgoingVariantUrl,
   parseManagedOutgoingArtifactId,
 } from "./managed-outgoing-artifact-id.js";
+import type { ManagedOutgoingMediaArtifactDownload } from "./managed-outgoing-media-artifact-download.types.js";
 import { tryResolveSessionCompatibilityOwnerAgentId } from "./session-request-agent.js";
 import { loadGatewaySessionEntryReadOnly } from "./session-utils.js";
 
-export const DEFAULT_SESSION_RESOURCE_MAX_BYTES = 512 * 1024 * 1024;
+const DEFAULT_SESSION_RESOURCE_MAX_BYTES = 512 * 1024 * 1024;
 
 export type SessionResourceMetadata = {
   artifactRef: string;
@@ -70,7 +70,7 @@ export type SessionResourceStream = {
   stream: AsyncIterable<Uint8Array>;
 };
 
-export type SessionRetentionState = "retained" | "gone" | "unavailable";
+type SessionRetentionState = "retained" | "gone" | "unavailable";
 
 /** Per-cleanup-pass session store availability cache, shared with the native cleanup loop. */
 export type SessionAvailabilityCache = Map<string, SessionStoreTargetsReadResult>;
@@ -198,13 +198,14 @@ export async function withSessionResourceRead<T>(
 }
 
 export function resolveSessionResourceMaxBytes(configured: number | undefined): number {
-  return Number.isSafeInteger(configured) && (configured as number) > 0
-    ? (configured as number)
-    : DEFAULT_SESSION_RESOURCE_MAX_BYTES;
+  if (configured === undefined || !Number.isSafeInteger(configured) || configured <= 0) {
+    return DEFAULT_SESSION_RESOURCE_MAX_BYTES;
+  }
+  return configured;
 }
 
 /** Reject host-path or separator-bearing names before a resource becomes durable. */
-export function assertSessionResourceFileName(value: string): string {
+function assertSessionResourceFileName(value: string): string {
   const hasControlCharacter = Array.from(value).some((character) => character.charCodeAt(0) < 32);
   if (
     !value ||
@@ -450,20 +451,6 @@ export async function openSessionResourceStream(params: {
   return { metadata, stream: verified() };
 }
 
-/** Index one retained record without exposing bytes or host paths. */
-export function toSessionResourceMetadata(
-  record: ManagedImageRecord,
-): SessionResourceMetadata | null {
-  if (record.retentionClass !== "session") {
-    return null;
-  }
-  const kind = resolveManagedMediaKind(record.original.contentType, { allowGeneric: true });
-  if (!kind) {
-    return null;
-  }
-  return toMetadata(record, kind, record.original.filename ?? record.alt);
-}
-
 export async function listSessionResourcesForScope(params: {
   sessionKey: string;
   sessionId?: string;
@@ -473,7 +460,7 @@ export async function listSessionResourcesForScope(params: {
   return entries.map((entry) => entry.record);
 }
 
-export function resolveSessionResourceOwnerAgentId(
+function resolveSessionResourceOwnerAgentId(
   sessionKey: string,
   explicitAgentId?: string,
   compatibilityAgentId?: string,
@@ -492,7 +479,7 @@ export function resolveSessionResourceOwnerAgentId(
  * exact session id, so the resource may be reclaimed. Any read failure or
  * ambiguity returns "unavailable", which callers must treat as keep.
  */
-export async function resolveSessionRetentionState(params: {
+async function resolveSessionRetentionState(params: {
   sessionKey: string;
   sessionId: string;
   agentId?: string;

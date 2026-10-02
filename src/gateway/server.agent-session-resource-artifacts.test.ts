@@ -130,10 +130,8 @@ describe("Gateway session resource artifacts", () => {
     const sessionKey = "agent:main:session-resource-api";
     const sessionId = "gateway-session-resource";
     const storePath = resolveSessionStorePathCore(undefined, { agentId: "main" });
-    await upsertSessionEntryCore(
-      { agentId: "main", sessionId, sessionKey, storePath },
-      { sessionId, updatedAt: Date.now() },
-    );
+    const scope = { agentId: "main", sessionKey, storePath };
+    await upsertSessionEntryCore(scope, { sessionId, updatedAt: Date.now() });
     const body = Buffer.from("session-resource-http-bytes-0123456789");
     const metadata = await importSessionResourceStream({
       sessionKey,
@@ -202,10 +200,7 @@ describe("Gateway session resource artifacts", () => {
     // A physical session replacement (same session key, new session id) must
     // stop disclosing the previous generation's resource.
     const nextSessionId = `${sessionId}-next`;
-    await upsertSessionEntryCore(
-      { agentId: "main", sessionId: nextSessionId, sessionKey, storePath },
-      { sessionId: nextSessionId, updatedAt: Date.now() },
-    );
+    await upsertSessionEntryCore(scope, { sessionId: nextSessionId, updatedAt: Date.now() });
     const afterReplacement = await client.request<{ artifacts: Array<{ id: string }> }>(
       "artifacts.list",
       { sessionKey },

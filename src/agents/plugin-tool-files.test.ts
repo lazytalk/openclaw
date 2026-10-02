@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
-import { bridgeProjection, localExecutionProjection } from "./execution-workspace.js";
+import { resolveSessionResourceProjection } from "./execution-workspace.js";
 import { createPluginToolFiles } from "./plugin-tool-files.js";
 import { createSandboxFsBridgeFromResolver } from "./test-helpers/host-sandbox-fs-bridge.js";
 
@@ -56,7 +56,11 @@ describe("plugin ctx.files adapter", () => {
     await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-files-"));
       try {
-        const projection = bridgeProjection(bridgeFor(root), CONTAINER_ROOT, 1 << 20);
+        const projection = resolveSessionResourceProjection({
+          bridge: bridgeFor(root),
+          cwd: CONTAINER_ROOT,
+          maxBytes: 1 << 20,
+        });
         const files = createPluginToolFiles({
           sessionKey: "agent:main:main",
           sessionId: "sess-1",
@@ -108,7 +112,11 @@ describe("plugin ctx.files adapter", () => {
     await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), "office365-roundtrip-"));
       try {
-        const projection = bridgeProjection(bridgeFor(root), CONTAINER_ROOT, 1 << 20);
+        const projection = resolveSessionResourceProjection({
+          bridge: bridgeFor(root),
+          cwd: CONTAINER_ROOT,
+          maxBytes: 1 << 20,
+        });
         const files = createPluginToolFiles({
           sessionKey: "agent:main:main",
           sessionId: "sess-o365",
@@ -161,7 +169,11 @@ describe("plugin ctx.files adapter", () => {
           sessionKey: "agent:main:main",
           sessionId: "sess-1",
           agentId: "main",
-          projection: bridgeProjection(bridgeFor(root), CONTAINER_ROOT, 4096),
+          projection: resolveSessionResourceProjection({
+            bridge: bridgeFor(root),
+            cwd: CONTAINER_ROOT,
+            maxBytes: 4096,
+          }),
           maxBytes: 4096,
         });
         expect(sandboxed.capabilities).toEqual({
@@ -198,7 +210,7 @@ describe("plugin ctx.files adapter", () => {
           sessionKey: "agent:main:main",
           sessionId: "sess-local",
           agentId: "main",
-          projection: localExecutionProjection(root, 1 << 20),
+          projection: resolveSessionResourceProjection({ workspaceRoot: root, maxBytes: 1 << 20 }),
           maxBytes: 1 << 20,
         });
         expect(files.capabilities.projection).toEqual({
@@ -233,7 +245,10 @@ describe("plugin ctx.files adapter", () => {
   it("writes the workspace file incrementally while the source stream is still open", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-stream-"));
     try {
-      const projection = localExecutionProjection(root, 1 << 24);
+      const projection = resolveSessionResourceProjection({
+        workspaceRoot: root,
+        maxBytes: 1 << 24,
+      });
       const CHUNK = 32 * 1024;
       const CHUNKS = 16;
       const total = CHUNK * CHUNKS;
@@ -286,7 +301,11 @@ describe("plugin ctx.files adapter", () => {
           sessionKey: "agent:main:main",
           sessionId: "sess-export",
           agentId: "main",
-          projection: bridgeProjection(bridge, CONTAINER_ROOT, 1 << 20),
+          projection: resolveSessionResourceProjection({
+            bridge: bridge,
+            cwd: CONTAINER_ROOT,
+            maxBytes: 1 << 20,
+          }),
           maxBytes: 1 << 20,
         });
         const big = Buffer.alloc(150 * 1024, 7);
@@ -316,7 +335,11 @@ describe("plugin ctx.files adapter", () => {
           sessionKey: "agent:main:main",
           sessionId: "sess-1",
           agentId: "main",
-          projection: bridgeProjection(bridgeFor(root), CONTAINER_ROOT, 100 * MIB),
+          projection: resolveSessionResourceProjection({
+            bridge: bridgeFor(root),
+            cwd: CONTAINER_ROOT,
+            maxBytes: 100 * MIB,
+          }),
           maxBytes: 100 * MIB,
         });
         expect(files.capabilities.resource.maxBytes).toBe(100 * MIB);
@@ -382,7 +405,7 @@ describe("plugin ctx.files adapter", () => {
           sessionKey: "agent:main:main",
           sessionId: "sess-link",
           agentId: "main",
-          projection: localExecutionProjection(root, 1 << 20),
+          projection: resolveSessionResourceProjection({ workspaceRoot: root, maxBytes: 1 << 20 }),
           maxBytes: 1 << 20,
         });
         await expect(
@@ -407,7 +430,7 @@ describe("plugin ctx.files adapter", () => {
           sessionKey: "agent:main:main",
           sessionId: "sess-mid",
           agentId: "main",
-          projection: localExecutionProjection(root, 1 << 20),
+          projection: resolveSessionResourceProjection({ workspaceRoot: root, maxBytes: 1 << 20 }),
           maxBytes: 1 << 20,
         });
         await expect(
@@ -434,7 +457,7 @@ describe("plugin ctx.files adapter", () => {
           sessionKey: "agent:main:main",
           sessionId: "sess-hard",
           agentId: "main",
-          projection: localExecutionProjection(root, 1 << 20),
+          projection: resolveSessionResourceProjection({ workspaceRoot: root, maxBytes: 1 << 20 }),
           maxBytes: 1 << 20,
         });
         await expect(
@@ -451,7 +474,10 @@ describe("plugin ctx.files adapter", () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-lifecycle-"));
       try {
-        const projection = localExecutionProjection(root, 1 << 20);
+        const projection = resolveSessionResourceProjection({
+          workspaceRoot: root,
+          maxBytes: 1 << 20,
+        });
         const files = createPluginToolFiles({
           sessionKey: "agent:main:main",
           sessionId: "sess-life",
@@ -481,7 +507,10 @@ describe("plugin ctx.files adapter", () => {
   it("removes a partial local materialization when the source stream fails", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-partial-"));
     try {
-      const projection = localExecutionProjection(root, 1 << 20);
+      const projection = resolveSessionResourceProjection({
+        workspaceRoot: root,
+        maxBytes: 1 << 20,
+      });
       async function* failing() {
         yield Buffer.from("partial-bytes");
         throw new Error("source failed");
@@ -502,7 +531,10 @@ describe("plugin ctx.files adapter", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-cancel-"));
     try {
       const controller = new AbortController();
-      const projection = localExecutionProjection(root, 1 << 20);
+      const projection = resolveSessionResourceProjection({
+        workspaceRoot: root,
+        maxBytes: 1 << 20,
+      });
       async function* chunks() {
         yield Buffer.alloc(64 * 1024, 1);
         controller.abort();
@@ -537,7 +569,11 @@ describe("plugin ctx.files adapter", () => {
           throw new Error("backend write failed");
         },
       };
-      const projection = bridgeProjection(bridge, CONTAINER_ROOT, 1 << 20);
+      const projection = resolveSessionResourceProjection({
+        bridge: bridge,
+        cwd: CONTAINER_ROOT,
+        maxBytes: 1 << 20,
+      });
       async function* src() {
         yield Buffer.from("a".repeat(1024));
       }

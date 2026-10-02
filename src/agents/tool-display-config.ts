@@ -272,6 +272,8 @@ export const TOOL_DISPLAY_CONFIG: ToolDisplayConfig = {
       "runTimeoutSeconds",
       "cleanup",
     ]),
+    artifact_materialize: displayTool("📥", "Materialize Artifact", ["artifactRef"]),
+    artifact_export: displayTool("📤", "Export Artifact", ["workspacePath", "fileName"]),
     agents_wait: displayTool("⏳", "Wait for Agents", ["ids", "timeoutSeconds"]),
     structured_output: displayTool("🧾", "Structured Output", ["result"]),
     subagents: {

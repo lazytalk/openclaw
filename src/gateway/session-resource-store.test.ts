@@ -17,7 +17,8 @@ import {
   importSessionResourceStream,
   listSessionResourcesForScope,
   openSessionResourceStream,
-  resolveSessionRetentionState,
+  resolveSessionResourceArtifactDownload,
+  shouldReclaimSessionResource,
 } from "./session-resource-store.js";
 
 async function drain(stream: AsyncIterable<Uint8Array>): Promise<Buffer> {
@@ -168,22 +169,24 @@ describe("native session resource store", () => {
         stream: byteStream(Buffer.from("stale")),
         fileName: "stale.txt",
       });
+      const liveRecord = await readManagedImageRecord(
+        parseManagedOutgoingArtifactId(live.artifactRef)!.attachmentId,
+        state.stateDir,
+      );
+      const goneRecord = await readManagedImageRecord(
+        parseManagedOutgoingArtifactId(stale.artifactRef)!.attachmentId,
+        state.stateDir,
+      );
+      // A live session is retained and disclosed; a proven-gone one is reclaimed.
       expect(
-        await resolveSessionRetentionState({
-          sessionKey: "agent:main:main",
-          sessionId: "sess-live",
-          agentId: "main",
-          stateDir: state.stateDir,
-        }),
-      ).toBe("retained");
+        await shouldReclaimSessionResource({ record: liveRecord!, stateDir: state.stateDir }),
+      ).toBe(false);
       expect(
-        await resolveSessionRetentionState({
-          sessionKey: "agent:main:main",
-          sessionId: "sess-gone",
-          agentId: "main",
-          stateDir: state.stateDir,
-        }),
-      ).toBe("gone");
+        await resolveSessionResourceArtifactDownload(liveRecord!, state.stateDir),
+      ).not.toBeNull();
+      expect(
+        await shouldReclaimSessionResource({ record: goneRecord!, stateDir: state.stateDir }),
+      ).toBe(true);
 
       await cleanupManagedOutgoingMediaRecords({ stateDir: state.stateDir });
       const liveId = parseManagedOutgoingArtifactId(live.artifactRef)!.attachmentId;
@@ -387,28 +390,23 @@ describe("native session resource store", () => {
         contentType: "application/octet-stream",
         stateDir: state.stateDir,
       });
+      const record = await readManagedImageRecord(
+        parseManagedOutgoingArtifactId(metadata.artifactRef)!.attachmentId,
+        state.stateDir,
+      );
       expect(
-        await resolveSessionRetentionState({
-          sessionKey: "agent:main:main",
-          sessionId: "sess-gen-a",
-          agentId: "main",
-          stateDir: state.stateDir,
-        }),
-      ).toBe("retained");
+        await shouldReclaimSessionResource({ record: record!, stateDir: state.stateDir }),
+      ).toBe(false);
 
       writeSessionEntry(database, "agent:main:main", {
         sessionId: "sess-gen-b",
         lifecycleRevision: "r2",
         updatedAt: 2,
       });
+      // A replaced generation is proven gone and reclaimed.
       expect(
-        await resolveSessionRetentionState({
-          sessionKey: "agent:main:main",
-          sessionId: "sess-gen-a",
-          agentId: "main",
-          stateDir: state.stateDir,
-        }),
-      ).toBe("gone");
+        await shouldReclaimSessionResource({ record: record!, stateDir: state.stateDir }),
+      ).toBe(true);
       const forGenerationB = await readSessionResourceArtifacts({
         sessionKey: "agent:main:main",
         sessionId: "sess-gen-b",
@@ -520,13 +518,12 @@ describe("native session resource store", () => {
         stateDir: state.stateDir,
       });
       const parsed = parseManagedOutgoingArtifactId(metadata.artifactRef)!;
+      const record = await readManagedImageRecord(parsed.attachmentId, state.stateDir);
+      // Ambiguous ownership is neither reclaimed nor disclosed (fail-safe keep).
       expect(
-        await resolveSessionRetentionState({
-          sessionKey: "unqualified-session-key",
-          sessionId: "sess-1",
-          stateDir: state.stateDir,
-        }),
-      ).toBe("unavailable");
+        await shouldReclaimSessionResource({ record: record!, stateDir: state.stateDir }),
+      ).toBe(false);
+      expect(await resolveSessionResourceArtifactDownload(record!, state.stateDir)).toBeNull();
       const result = await cleanupManagedOutgoingMediaRecords({ stateDir: state.stateDir });
       expect(result.deletedRecordCount).toBe(0);
       expect(await readManagedImageRecord(parsed.attachmentId, state.stateDir)).not.toBeNull();

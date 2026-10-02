@@ -33,10 +33,10 @@ function toArtifact(metadata: SessionResourceMetadata): PluginArtifact {
 }
 
 function clampBytes(requested: number | undefined, ceiling: number): number {
-  if (!Number.isSafeInteger(requested) || (requested as number) < 1) {
+  if (requested === undefined || !Number.isSafeInteger(requested) || requested < 1) {
     return ceiling;
   }
-  return Math.min(requested as number, ceiling);
+  return Math.min(requested, ceiling);
 }
 
 export function createPluginToolFiles(params: {

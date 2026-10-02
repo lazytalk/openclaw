@@ -24,7 +24,7 @@ const WORKSPACE_SUBDIR = ".openclaw-session-resources";
  * transfer. A backend that can stream declares the resource ceiling instead;
  * this keeps a buffered backend honest rather than silently accepting 512 MiB.
  */
-export const DEFAULT_BUFFERED_PROJECTION_MAX_BYTES = 50 * 1024 * 1024;
+const DEFAULT_BUFFERED_PROJECTION_MAX_BYTES = 50 * 1024 * 1024;
 
 /** Placement-neutral projection for session-retained resources and exports. */
 export type SessionResourceProjection = {
@@ -196,10 +196,7 @@ function confineAgainstRoot(root: string, filePath: string): string {
  * Native local execution projection: the execution host owns the workspace root,
  * so the copy streams host-to-host with no whole-file buffer.
  */
-export function localExecutionProjection(
-  root: string,
-  maxBytes: number,
-): SessionResourceProjection {
+function localExecutionProjection(root: string, maxBytes: number): SessionResourceProjection {
   const resolvedRoot = path.resolve(root);
   const generated = new Set<string>();
   return {
@@ -284,7 +281,7 @@ export function localExecutionProjection(
  * placement bridge when it exposes streaming primitives; otherwise it reuses the
  * bridge's bounded whole-file transfer.
  */
-export function bridgeProjection(
+function bridgeProjection(
   bridge: SandboxFsBridge,
   cwd: string,
   maxBytes: number,

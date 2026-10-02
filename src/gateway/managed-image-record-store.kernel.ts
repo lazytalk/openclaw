@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
@@ -55,14 +56,12 @@ function parseManagedSourceJson(sourceJson: string | null): string | undefined {
   }
   try {
     const parsed: unknown = JSON.parse(sourceJson);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const source = (parsed as Record<string, unknown>).source;
-      return typeof source === "string" && source ? source : undefined;
-    }
+    const record = asOptionalRecord(parsed);
+    const source = record?.source;
+    return typeof source === "string" && source ? source : undefined;
   } catch {
     return undefined;
   }
-  return undefined;
 }
 
 export function managedImageRecordToRow(record: ManagedImageRecord): ManagedImageRecordInsert {
@@ -93,6 +92,7 @@ export function managedImageRecordToRow(record: ManagedImageRecord): ManagedImag
 }
 
 export function managedImageRecordFromRow(row: ManagedImageRecordRow): ManagedImageRecord {
+  const source = parseManagedSourceJson(row.source_json);
   return {
     attachmentId: row.attachment_id,
     sessionKey: row.session_key,
@@ -108,9 +108,7 @@ export function managedImageRecordFromRow(row: ManagedImageRecordRow): ManagedIm
     alt: row.alt,
     ...(row.session_id ? { sessionId: row.session_id } : {}),
     ...(row.sha256 ? { sha256: row.sha256 } : {}),
-    ...(parseManagedSourceJson(row.source_json) !== undefined
-      ? { source: parseManagedSourceJson(row.source_json)! }
-      : {}),
+    ...(source !== undefined ? { source } : {}),
     ...(row.role ? { role: row.role } : {}),
     ...(row.derived_from_attachment_id
       ? { derivedFromAttachmentId: row.derived_from_attachment_id }
