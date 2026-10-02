@@ -5,6 +5,7 @@ import type { ConversationReadInvocationOrigin } from "../channels/plugins/conve
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { HookEntry } from "../hooks/types.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
+import type { PluginToolFiles } from "./tool-files.types.js";
 
 export type OpenClawPluginActiveModelContext = {
   provider?: string;
@@ -58,6 +59,13 @@ type OpenClawPluginToolContextBase = {
   deliveryContext?: DeliveryContext;
   /** Host-bound current-route delivery. Retained copies fail after the owning turn closes. */
   delivery?: OpenClawPluginToolDelivery;
+  /**
+   * Host-bound session resource capability. Streams external bytes into the
+   * current admitted session and projects them into the active execution
+   * workspace. Ownership follows the ambient session; plugins select no session,
+   * host path, or principal.
+   */
+  files?: PluginToolFiles;
   /** Trusted platform-native conversation id for the active inbound turn. */
   nativeChannelId?: string;
   /** Trusted sender id from inbound context (runtime-provided, not tool args). */

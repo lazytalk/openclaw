@@ -63,6 +63,23 @@ export async function listManagedImageRecordEntries(params: {
   });
 }
 
+/** List session-retained resources for an exact native session scope. */
+export async function listManagedSessionResourceRecords(params: {
+  sessionKey: string;
+  sessionId?: string;
+  stateDir?: string;
+}): Promise<ManagedImageRecordEntry[]> {
+  const context = captureManagedImageContext(params.stateDir);
+  const { executeOpenClawStateWorker } = await import("../state/openclaw-state-worker-store.js");
+  return await executeOpenClawStateWorker(context, {
+    type: "managedImages.sessionResources",
+    input: {
+      sessionKey: params.sessionKey,
+      ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+    },
+  });
+}
+
 export async function listManagedImageOriginalMediaIds(stateDir?: string): Promise<string[]> {
   const context = captureManagedImageContext(stateDir);
   const { executeOpenClawStateWorker } = await import("../state/openclaw-state-worker-store.js");

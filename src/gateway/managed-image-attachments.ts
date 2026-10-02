@@ -89,7 +89,6 @@ import {
   resolveManagedImageThumbnail,
 } from "./managed-image-thumbnail-cache.js";
 import {
-  createManagedOutgoingImageTicket,
   verifyManagedOutgoingImageTicket,
   MANAGED_OUTGOING_IMAGE_TICKET_TTL_MS,
 } from "./managed-image-tickets.js";
@@ -101,6 +100,12 @@ import {
 } from "./managed-outgoing-artifact-id.js";
 import { authorizeOperatorScopesForMethod } from "./method-scopes.js";
 import { tryResolveSessionCompatibilityOwnerAgentId } from "./session-request-agent.js";
+import {
+  buildManagedMediaArtifactDownload,
+  resolveSessionResourceArtifactDownload,
+  shouldReclaimSessionResource,
+  type SessionAvailabilityCache,
+} from "./session-resource-store.js";
 import {
   readSessionMessagesMatchingIdAsync,
   readSessionMessagesWithSourceAsync,
@@ -431,6 +436,7 @@ export async function cleanupManagedOutgoingMediaRecords(params?: {
   const forceDeleteSessionRecords = params?.forceDeleteSessionRecords === true;
   const entries = await listManagedImageRecordEntries({ stateDir });
   let pendingPreparedAttachmentIds: Set<string> | null | undefined;
+  const sessionResourceAvailabilityCache: SessionAvailabilityCache = new Map();
 
   let deletedRecordCount = 0;
   let deletedFileCount = 0;
@@ -464,6 +470,14 @@ export async function cleanupManagedOutgoingMediaRecords(params?: {
     let shouldDelete = entry.cleanupPending;
     if (!entry.cleanupPending && forceDeleteSessionRecords) {
       shouldDelete = true;
+    } else if (!entry.cleanupPending && record.retentionClass === "session") {
+      // Reclaim only when native session state proves the owner is gone; unavailable keeps.
+      shouldDelete = await shouldReclaimSessionResource({
+        record,
+        stateDir,
+        storeTargetsReadCache: sessionStoreTargetsReadCache,
+        storeAvailabilityCache: sessionResourceAvailabilityCache,
+      });
     } else if (!entry.cleanupPending && record.messageId) {
       const transcriptMatch = await recordMatchesTranscriptMessage(
         record,
@@ -860,43 +874,13 @@ async function resolveManagedOutgoingMediaArtifactDownloadForRecord(
   record: ManagedImageRecord,
   stateDir?: string,
 ): Promise<ManagedOutgoingMediaArtifactDownload | null> {
+  if (record.retentionClass === "session") {
+    return resolveSessionResourceArtifactDownload(record, stateDir);
+  }
   return withManagedOutgoingMediaRead(
     record,
     stateDir ?? resolveStateDir(),
-    async (assertCurrent) => {
-      const kind = resolveManagedMediaKind(record.original.contentType);
-      if (!kind) {
-        return null;
-      }
-      try {
-        const stat = await fs.stat(resolveManagedImageOriginalPath(record));
-        if (!stat.isFile()) {
-          return null;
-        }
-      } catch {
-        return null;
-      }
-      assertCurrent();
-      const ticket = createManagedOutgoingImageTicket({
-        sessionKey: record.sessionKey,
-        attachmentId: record.attachmentId,
-      });
-      if (!ticket) {
-        return null;
-      }
-      const canonicalUrl = buildOutgoingVariantUrl(record.sessionKey, record.attachmentId, "full");
-      const params = new URLSearchParams({ mediaTicket: ticket.ticket });
-      return {
-        artifactId: buildManagedOutgoingArtifactId(record.attachmentId, kind),
-        sessionKey: record.sessionKey,
-        type: kind === "document" ? "file" : kind,
-        title: kind === "image" ? record.alt : (record.original.filename ?? record.alt),
-        ...(record.original.contentType ? { mimeType: record.original.contentType } : {}),
-        ...(record.original.sizeBytes != null ? { sizeBytes: record.original.sizeBytes } : {}),
-        url: `${canonicalUrl}?${params.toString()}`,
-        expiresAt: ticket.expiresAt,
-      };
-    },
+    async (assertCurrent) => buildManagedMediaArtifactDownload(record, assertCurrent),
   );
 }
 

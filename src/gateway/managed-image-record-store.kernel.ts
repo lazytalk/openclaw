@@ -41,8 +41,29 @@ const MANAGED_IMAGE_RECORD_COLUMNS = [
   "original_height",
   "original_size_bytes",
   "original_filename",
+  "session_id",
+  "sha256",
+  "source_json",
+  "role",
+  "derived_from_attachment_id",
   "cleanup_pending",
 ] as const satisfies readonly (keyof ManagedImageRecordRow)[];
+
+function parseManagedSourceJson(sourceJson: string | null): string | undefined {
+  if (!sourceJson) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(sourceJson);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const source = (parsed as Record<string, unknown>).source;
+      return typeof source === "string" && source ? source : undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
 
 export function managedImageRecordToRow(record: ManagedImageRecord): ManagedImageRecordInsert {
   return {
@@ -62,6 +83,11 @@ export function managedImageRecordToRow(record: ManagedImageRecord): ManagedImag
     original_height: record.original.height,
     original_size_bytes: record.original.sizeBytes,
     original_filename: record.original.filename,
+    session_id: record.sessionId ?? null,
+    sha256: record.sha256 ?? null,
+    source_json: record.source ? JSON.stringify({ source: record.source }) : null,
+    role: record.role ?? null,
+    derived_from_attachment_id: record.derivedFromAttachmentId ?? null,
     record_json: JSON.stringify(record),
   };
 }
@@ -74,10 +100,21 @@ export function managedImageRecordFromRow(row: ManagedImageRecordRow): ManagedIm
     messageId: row.message_id,
     createdAt: row.created_at,
     ...(row.updated_at ? { updatedAt: row.updated_at } : {}),
-    ...(row.retention_class === "history" || row.retention_class === "transient"
+    ...(row.retention_class === "history" ||
+    row.retention_class === "transient" ||
+    row.retention_class === "session"
       ? { retentionClass: row.retention_class }
       : {}),
     alt: row.alt,
+    ...(row.session_id ? { sessionId: row.session_id } : {}),
+    ...(row.sha256 ? { sha256: row.sha256 } : {}),
+    ...(parseManagedSourceJson(row.source_json) !== undefined
+      ? { source: parseManagedSourceJson(row.source_json)! }
+      : {}),
+    ...(row.role ? { role: row.role } : {}),
+    ...(row.derived_from_attachment_id
+      ? { derivedFromAttachmentId: row.derived_from_attachment_id }
+      : {}),
     original: {
       mediaRoot: row.original_media_root,
       mediaId: row.original_media_id,
@@ -123,6 +160,28 @@ function listManagedImageRecordEntriesInDatabase(
     .select(MANAGED_IMAGE_RECORD_COLUMNS);
   if (sessionKey) {
     query = query.where("session_key", "=", sessionKey);
+  }
+  return executeSqliteQuerySync(
+    db,
+    query.orderBy("created_at", "desc").orderBy("attachment_id", "asc"),
+  ).rows.map((row) => ({
+    record: managedImageRecordFromRow(row),
+    cleanupPending: row.cleanup_pending === 1,
+  }));
+}
+
+function listManagedSessionResourceRecordsInDatabase(
+  db: DatabaseSync,
+  params: { sessionKey: string; sessionId?: string },
+): ManagedImageRecordEntry[] {
+  const stateDb = getNodeSqliteKysely<ManagedImageRecordDatabase>(db);
+  let query = stateDb
+    .selectFrom("managed_outgoing_image_records")
+    .select(MANAGED_IMAGE_RECORD_COLUMNS)
+    .where("session_key", "=", params.sessionKey)
+    .where("retention_class", "=", "session");
+  if (params.sessionId) {
+    query = query.where("session_id", "=", params.sessionId);
   }
   return executeSqliteQuerySync(
     db,
@@ -294,6 +353,8 @@ export const managedImageRecordOperations = {
     readManagedImageRecordInDatabase(open().db, attachmentId),
   "managedImages.entries": ({ sessionKey }: { sessionKey?: string }, { open }) =>
     listManagedImageRecordEntriesInDatabase(open().db, sessionKey),
+  "managedImages.sessionResources": (input: { sessionKey: string; sessionId?: string }, { open }) =>
+    listManagedSessionResourceRecordsInDatabase(open().db, input),
   "managedImages.originalMediaIds": (_input: undefined, { open }) =>
     listManagedImageOriginalMediaIdsInDatabase(open().db),
 } satisfies WorkerOperationHandlers;

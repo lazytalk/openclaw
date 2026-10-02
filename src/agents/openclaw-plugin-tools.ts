@@ -11,6 +11,7 @@ import {
   resolveMessageActionTurnCapability,
   selectMessageActionRequesterIdentity,
 } from "../gateway/message-action-turn-capability.js";
+import { resolveSessionResourceMaxBytes } from "../gateway/session-resource-store.js";
 import { resolveAgentScopedOutboundMediaAccess } from "../media/read-capability.js";
 import { getActivePluginRegistry, getActivePluginRegistryVersion } from "../plugins/runtime.js";
 import {
@@ -25,6 +26,7 @@ import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import { resolveApiKeyForProfile, resolveAuthProfileOrder } from "./auth-profiles.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
 import { bindRequesterOwnerIdentity } from "./cron-creator-authority-context.js";
+import { resolveExecutionWorkspace } from "./execution-workspace.js";
 import {
   createRuntimeProviderAuthLookup,
   hasRuntimeAvailableProviderAuth,
@@ -35,8 +37,11 @@ import {
   resolveOpenClawPluginToolInputs,
   type OpenClawPluginToolOptions,
 } from "./openclaw-tools.plugin-context.js";
+import { createPluginToolFiles } from "./plugin-tool-files.js";
 import type { PreparedModelRuntimeSnapshot } from "./prepared-model-runtime.types.js";
+import type { SandboxFsBridge } from "./sandbox/fs-bridge.types.js";
 import { resolveAgentRuntimeToolConfig } from "./tool-runtime-config.js";
+import { createArtifactTools } from "./tools/artifact-tools.js";
 import type { AnyAgentTool } from "./tools/common.js";
 import { captureGatewayToolCallerAssertion } from "./tools/gateway-caller-context.js";
 import { hasProviderAuthForTool } from "./tools/model-config.helpers.js";
@@ -48,6 +53,9 @@ type ResolveOpenClawPluginToolsOptions = OpenClawPluginToolOptions & {
   currentThreadTs?: string;
   currentMessageId?: string | number;
   sandboxRoot?: string;
+  sandboxFsBridge?: SandboxFsBridge;
+  sandboxContainerWorkdir?: string;
+  registerRunCleanup?: (cleanup: (reason: string) => Promise<void>) => void;
   modelHasVision?: boolean;
   modelProvider?: string;
   modelId?: string;
@@ -329,21 +337,48 @@ export function resolveOpenClawPluginToolsForOptions(params: {
   const metadataSnapshot = preparedModelRuntime?.metadataSnapshot ?? loadContext?.metadataSnapshot;
   const assertCallerCurrent = captureGatewayToolCallerAssertion();
   const assertRequestCurrent = params.options?.assertInvocationCurrent;
+  const assertInvocationCurrent = assertRequestCurrent
+    ? () => {
+        assertCallerCurrent?.();
+        assertRequestCurrent();
+      }
+    : assertCallerCurrent;
+  const context = pluginToolInputs.context;
+  const sessionResourceMaxBytes = availabilityConfig?.tools?.sessionResources?.maxBytes;
+  const executionWorkspace =
+    context.sessionKey && context.sessionId
+      ? resolveExecutionWorkspace({
+          sandboxed: params.options?.sandboxed,
+          bridge: params.options?.sandboxFsBridge,
+          cwd: params.options?.sandboxContainerWorkdir,
+          maxBytes: resolveSessionResourceMaxBytes(sessionResourceMaxBytes),
+        })
+      : undefined;
+  const files =
+    context.sessionKey && context.sessionId
+      ? createPluginToolFiles({
+          sessionKey: context.sessionKey,
+          sessionId: context.sessionId,
+          ...(context.agentId ? { agentId: context.agentId } : {}),
+          ...(executionWorkspace ? { workspace: executionWorkspace } : {}),
+          ...(sessionResourceMaxBytes !== undefined ? { maxBytes: sessionResourceMaxBytes } : {}),
+          ...(params.options?.registerRunCleanup
+            ? { registerRunCleanup: params.options.registerRunCleanup }
+            : {}),
+          ...(assertInvocationCurrent ? { assertCurrent: assertInvocationCurrent } : {}),
+        })
+      : undefined;
   const pluginTools = resolvePluginTools({
     ...pluginToolInputs,
     context: {
-      ...pluginToolInputs.context,
+      ...context,
       ...(delivery ? { delivery } : {}),
+      ...(files ? { files } : {}),
       ...(hasAuthForProvider ? { hasAuthForProvider } : {}),
       ...(resolveApiKeyForProvider ? { resolveApiKeyForProvider } : {}),
     },
     existingToolNames,
-    assertInvocationCurrent: assertRequestCurrent
-      ? () => {
-          assertCallerCurrent?.();
-          assertRequestCurrent();
-        }
-      : assertCallerCurrent,
+    assertInvocationCurrent,
     ownerContinuation: requesterOwner,
     clientCaps: params.options?.clientCaps,
     toolAllowlist: params.options?.pluginToolAllowlist,
@@ -363,6 +398,13 @@ export function resolveOpenClawPluginToolsForOptions(params: {
   });
   for (const tool of pluginTools) {
     existingToolNames.add(tool.name);
+  }
+  if (files && executionWorkspace) {
+    const artifactTools = createArtifactTools(files);
+    for (const tool of artifactTools) {
+      existingToolNames.add(tool.name);
+    }
+    pluginTools.push(...artifactTools);
   }
   pluginTools.push(
     ...createNodePluginTools({

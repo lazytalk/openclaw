@@ -750,6 +750,17 @@ export const ToolsSchema = z
     subagents: NestedToolPolicySchema,
     /** Sandbox tool policy defaults (deny wins). */
     sandbox: NestedToolPolicySchema,
+    /**
+     * Session-retained resource custody for stream-native provider ingestion.
+     * `session` retention keeps resources alive only while the exact owning
+     * native session id remains retained.
+     */
+    sessionResources: z
+      .strictObject({
+        /** Maximum bytes for one session-retained resource. Default: 512 MiB. */
+        maxBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+      })
+      .optional(),
     /** sessions_spawn tool configuration. */
     sessions_spawn: z
       .strictObject({

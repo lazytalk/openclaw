@@ -12,7 +12,7 @@ type ManagedImageRecordVariant = {
   filename: string | null;
 };
 
-type ManagedImageRetentionClass = "transient" | "history";
+type ManagedImageRetentionClass = "transient" | "history" | "session";
 
 export type ManagedImageRecord = {
   attachmentId: string;
@@ -23,6 +23,16 @@ export type ManagedImageRecord = {
   updatedAt?: string;
   retentionClass?: ManagedImageRetentionClass;
   alt: string;
+  /** Exact native physical session id that owns a session-retained resource. */
+  sessionId?: string;
+  /** Lowercase hex SHA-256 of the retained bytes. */
+  sha256?: string;
+  /** Minimal non-secret provenance label for a session-retained resource. */
+  source?: string;
+  /** Optional workflow role (for example "attachment" or "derived"). */
+  role?: string;
+  /** Attachment id this resource was derived from, when applicable. */
+  derivedFromAttachmentId?: string;
   original: ManagedImageRecordVariant;
 };
 

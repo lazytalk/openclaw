@@ -730,6 +730,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/models-config.write-serialization.test.ts",
   "src/agents/plugin-model-catalog-auth.test.ts",
   "src/agents/plugin-model-catalog.test.ts",
+  "src/agents/plugin-tool-files.test.ts",
   "src/agents/context.opencode-go.test.ts",
   "src/agents/simple-completion-runtime.selected-model.test.ts",
   "src/agents/tools/pdf-tool.resources.test.ts",

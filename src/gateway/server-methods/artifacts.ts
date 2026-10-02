@@ -8,6 +8,7 @@ import {
   validateArtifactsListParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { AgentSelectionRequiredError } from "../../agents/agent-scope-config.js";
+import { resolveStateDir } from "../../config/paths.js";
 import { resolveSessionTranscriptReadFence } from "../../config/sessions/session-transcript-read-fence.js";
 import { readSessionTranscriptUpdateVersion } from "../../sessions/transcript-events.js";
 import { resolveChatAttachmentFrameBudgetBytes } from "../../shared/chat-attachment-frame-budget.js";
@@ -38,6 +39,7 @@ import {
   createArtifactSessionAccess,
   prepareArtifactSessionResolution,
 } from "./artifacts-session-resolution.js";
+import { readSessionResourceArtifacts } from "./artifacts-session-resources.js";
 import { findTranscriptImageArtifact } from "./artifacts-transcript-images.js";
 import { readGatewayRequestMutationAuthority } from "./session-mutation-guards.js";
 import type { GatewayRequestHandlerOptions, GatewayRequestHandlers, RespondFn } from "./types.js";
@@ -162,7 +164,18 @@ async function loadArtifacts(
       includeDownloadData: opts.includeDownloadData,
       downloadArtifactIds: downloadIds ? [...downloadIds] : undefined,
     });
-    return { sessionKey, artifacts };
+    // Session-retained provider resources are owned by the exact session, not a
+    // transcript message; they are hidden from assistant-only transcript filters.
+    const sessionResources =
+      query.messageRole === "assistant"
+        ? []
+        : await readSessionResourceArtifacts({
+            sessionKey,
+            sessionId,
+            stateDir: resolveStateDir(),
+          });
+    assertCurrent();
+    return { sessionKey, artifacts: [...artifacts, ...sessionResources] };
   };
   const result = queuedKey && downloadIds ? Promise.resolve().then(collect) : collect();
   if (queuedKey && downloadIds) {

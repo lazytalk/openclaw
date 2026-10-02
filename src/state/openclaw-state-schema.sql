@@ -797,6 +797,11 @@ CREATE TABLE IF NOT EXISTS managed_outgoing_image_records (
   original_height INTEGER,
   original_size_bytes INTEGER,
   original_filename TEXT,
+  session_id TEXT,
+  sha256 TEXT,
+  source_json TEXT,
+  role TEXT,
+  derived_from_attachment_id TEXT,
   record_json TEXT NOT NULL,
   cleanup_pending INTEGER NOT NULL DEFAULT 0 CHECK (cleanup_pending IN (0, 1))
 ) STRICT;

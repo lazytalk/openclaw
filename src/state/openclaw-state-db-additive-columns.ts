@@ -48,6 +48,13 @@ const lazyColumns = [
   ["cron_jobs", "grant_definition_revision", "TEXT"],
   ["cron_jobs", "grant_definition_generation", "INTEGER"],
   ["cron_jobs", "grant_definition_updated_at", "INTEGER"],
+  // Session-retained managed media: exact owning session id, integrity hash, and
+  // minimal non-secret provenance for stream-native provider ingestion.
+  ["managed_outgoing_image_records", "session_id", "TEXT"],
+  ["managed_outgoing_image_records", "sha256", "TEXT"],
+  ["managed_outgoing_image_records", "source_json", "TEXT"],
+  ["managed_outgoing_image_records", "role", "TEXT"],
+  ["managed_outgoing_image_records", "derived_from_attachment_id", "TEXT"],
 ] as const satisfies readonly LazyColumn[];
 
 function lazyColumnDefinitions(firstUseOnly?: boolean) {

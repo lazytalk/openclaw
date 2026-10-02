@@ -144,6 +144,8 @@ export type {
   OpenClawPluginActiveModelContext,
   OpenClawPluginToolContext,
   OpenClawPluginToolFactory,
+  PluginArtifact,
+  PluginToolFiles,
 } from "../plugins/types.js";
 export type {
   OpenClawPluginGatewayEventScope,
