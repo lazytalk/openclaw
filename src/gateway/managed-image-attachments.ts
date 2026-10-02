@@ -177,6 +177,8 @@ export type ManagedOutgoingMediaArtifactDownload = {
   title: string;
   mimeType?: string;
   sizeBytes?: number;
+  /** Discovery classification, kept stable across list/get/download. */
+  source: "session-resource" | "session-transcript";
   url: string;
   expiresAt: string;
 };

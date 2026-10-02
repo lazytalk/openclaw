@@ -19,6 +19,8 @@ it("isolates a session attachment projection from sibling agent-scoped sessions"
   const workspaceDir = path.join(stateDir, "workspace");
   const attachedSessionKey = "agent:main:subagent:attached";
   const siblingSessionKey = "agent:main:subagent:sibling";
+  const attachedSessionId = "sess-attached";
+  const siblingSessionId = "sess-sibling";
   const attachmentRoot = resolveSubagentSessionAttachmentRootDir({
     agentId: "main",
     childSessionKey: attachedSessionKey,
@@ -64,13 +66,15 @@ it("isolates a session attachment projection from sibling agent-scoped sessions"
       const beforeAttachment = await resolveSandboxContext({
         config: cfg,
         sessionKey: attachedSessionKey,
+        sessionId: attachedSessionId,
         workspaceDir,
       });
-      const resourceRootFor = (sessionKey: string) =>
+      const resourceRootFor = (sessionKey: string, sessionId: string) =>
         fs.realpath(
           resolveSessionResourceProjectionRootDir({
             agentId: "main",
             sessionKey,
+            sessionId,
             env: { ...process.env, OPENCLAW_STATE_DIR: stateDir },
           }),
         );
@@ -78,7 +82,7 @@ it("isolates a session attachment projection from sibling agent-scoped sessions"
       // copy a canonical resource into the workspace natively.
       expect(beforeAttachment?.readOnlyResourceMounts).toEqual([
         {
-          hostPath: await resourceRootFor(attachedSessionKey),
+          hostPath: await resourceRootFor(attachedSessionKey, attachedSessionId),
           containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
         },
       ]);
@@ -87,11 +91,13 @@ it("isolates a session attachment projection from sibling agent-scoped sessions"
       const attached = await resolveSandboxContext({
         config: cfg,
         sessionKey: attachedSessionKey,
+        sessionId: attachedSessionId,
         workspaceDir,
       });
       const sibling = await resolveSandboxContext({
         config: cfg,
         sessionKey: siblingSessionKey,
+        sessionId: siblingSessionId,
         workspaceDir,
       });
 
@@ -101,13 +107,13 @@ it("isolates a session attachment projection from sibling agent-scoped sessions"
           containerPath: "/openclaw/attachments",
         },
         {
-          hostPath: await resourceRootFor(attachedSessionKey),
+          hostPath: await resourceRootFor(attachedSessionKey, attachedSessionId),
           containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
         },
       ]);
       expect(sibling?.readOnlyResourceMounts).toEqual([
         {
-          hostPath: await resourceRootFor(siblingSessionKey),
+          hostPath: await resourceRootFor(siblingSessionKey, siblingSessionId),
           containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
         },
       ]);

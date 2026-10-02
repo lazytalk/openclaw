@@ -355,10 +355,11 @@ export function resolveOpenClawPluginToolsForOptions(params: {
     : undefined;
   // The placement-owned host root projected read-only into a sandbox, when present.
   const projectedRoot =
-    context.agentId && context.sessionKey
+    context.agentId && context.sessionKey && context.sessionId
       ? resolveSessionResourceProjectionRootDir({
           agentId: context.agentId,
           sessionKey: context.sessionKey,
+          sessionId: context.sessionId,
         })
       : undefined;
   const projection =

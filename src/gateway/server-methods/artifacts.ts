@@ -305,7 +305,8 @@ async function respondManagedArtifactDownload(
         sessionKey: managed.sessionKey,
         ...(matched?.runId ? { runId: matched.runId } : {}),
         ...(matched?.messageSeq !== undefined ? { messageSeq: matched.messageSeq } : {}),
-        source: "session-transcript",
+        // Keep the discovery classification stable across list/get/download.
+        source: matched?.source ?? managed.source,
         download: { mode: "url" as const },
       },
       url: managed.url,

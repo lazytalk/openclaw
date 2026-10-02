@@ -7,7 +7,10 @@ import { openOpenClawAgentDatabase } from "../state/openclaw-agent-db.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { resolveManagedImageOriginalPath } from "./managed-image-attachments.custody.js";
 import { cleanupManagedOutgoingMediaRecords } from "./managed-image-attachments.js";
-import { readManagedImageRecord } from "./managed-image-record-store.js";
+import {
+  claimManagedImageRecordCleanupIfCurrent,
+  readManagedImageRecord,
+} from "./managed-image-record-store.js";
 import { parseManagedOutgoingArtifactId } from "./managed-outgoing-artifact-id.js";
 import { readSessionResourceArtifacts } from "./server-methods/artifacts-session-resources.js";
 import {
@@ -472,6 +475,37 @@ describe("native session resource store", () => {
           stateDir: state.stateDir,
         }),
       ).rejects.toThrow(/not owned/u);
+    });
+  });
+
+  it("hides a cleanup-pending resource from discovery", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+      const metadata = await importSessionResourceStream({
+        sessionKey: "agent:main:main",
+        sessionId: "sess-1",
+        agentId: "main",
+        stream: byteStream(Buffer.from("claimed")),
+        fileName: "claimed.bin",
+        contentType: "application/octet-stream",
+        stateDir: state.stateDir,
+      });
+      const attachmentId = parseManagedOutgoingArtifactId(metadata.artifactRef)!.attachmentId;
+      const record = await readManagedImageRecord(attachmentId, state.stateDir);
+      expect(record).not.toBeNull();
+      expect(await claimManagedImageRecordCleanupIfCurrent(record!, state.stateDir)).toBe(true);
+
+      const listed = await listSessionResourcesForScope({
+        sessionKey: "agent:main:main",
+        sessionId: "sess-1",
+        stateDir: state.stateDir,
+      });
+      expect(listed.map((entry) => entry.attachmentId)).not.toContain(attachmentId);
+      const artifacts = await readSessionResourceArtifacts({
+        sessionKey: "agent:main:main",
+        sessionId: "sess-1",
+        stateDir: state.stateDir,
+      });
+      expect(artifacts.some((artifact) => artifact.id === metadata.artifactRef)).toBe(false);
     });
   });
 

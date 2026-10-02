@@ -222,6 +222,8 @@ type ResolveSandboxContextParams = {
   assertCurrent?: () => void;
   admittedRunContext?: AdmittedRunContext;
   sessionKey?: string;
+  /** Exact native session generation; scopes the session resource projection root. */
+  sessionId?: string;
   skillsSnapshot?: SkillSnapshot;
   workspaceDir?: string;
   /** Classification already prepared for this session's workspace setup. */
@@ -333,19 +335,24 @@ async function resolveProvisionedSandboxContext(
           }
           // Session resources are projected read-only so materialize can copy a
           // canonical resource into the writable execution workspace natively.
-          // The root is created so the mount is present for the whole run.
-          const resourcePath = resolveSessionResourceProjectionRootDir({
-            agentId: runtime.agentId,
-            sessionKey: rawSessionKey,
-          });
-          try {
-            await fs.mkdir(resourcePath, { recursive: true, mode: 0o700 });
-            mounts.push({
-              hostPath: await fs.realpath(resourcePath),
-              containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
+          // The root is scoped to the exact session generation; without a known
+          // sessionId the mount is omitted and materialize fails closed.
+          const sessionId = params.sessionId?.trim();
+          if (sessionId) {
+            const resourcePath = resolveSessionResourceProjectionRootDir({
+              agentId: runtime.agentId,
+              sessionKey: rawSessionKey,
+              sessionId,
             });
-          } catch {
-            // A root that cannot be created leaves materialize failing closed.
+            try {
+              await fs.mkdir(resourcePath, { recursive: true, mode: 0o700 });
+              mounts.push({
+                hostPath: await fs.realpath(resourcePath),
+                containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
+              });
+            } catch {
+              // A root that cannot be created leaves materialize failing closed.
+            }
           }
           return mounts.length ? mounts : undefined;
         })();

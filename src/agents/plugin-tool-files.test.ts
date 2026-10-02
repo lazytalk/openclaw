@@ -11,6 +11,7 @@ import {
   resolveProjectedMount,
 } from "./execution-workspace.js";
 import { createPluginToolFiles } from "./plugin-tool-files.js";
+import { resolveSessionResourceProjectionRootDir } from "./session-resource-projection-paths.js";
 import { createSandboxFsBridgeFromResolver } from "./test-helpers/host-sandbox-fs-bridge.js";
 
 const CONTAINER_ROOT = "/workspace";
@@ -79,7 +80,7 @@ describe("plugin ctx.files adapter", () => {
 
         const materialized = await files.materialize({ artifactRef: artifact.artifactRef });
         expect(materialized.workspacePath.startsWith(`${CONTAINER_ROOT}/`)).toBe(true);
-        expect(materialized.backend).toBe("sandbox");
+        expect(materialized.size).toBe(bytes.byteLength);
         const hostFile = path.join(
           root,
           path.posix.relative(CONTAINER_ROOT, materialized.workspacePath),
@@ -219,7 +220,6 @@ describe("plugin ctx.files adapter", () => {
           contentType: "text/plain",
         });
         const materialized = await files.materialize({ artifactRef: artifact.artifactRef });
-        expect(materialized.backend).toBe("host");
         expect(materialized.workspacePath.startsWith(`${root}${path.sep}`)).toBe(true);
         expect((await fs.readFile(materialized.workspacePath)).equals(bytes)).toBe(true);
         await fs.writeFile(path.join(root, "out.txt"), Buffer.from("local-export"));
@@ -334,7 +334,11 @@ describe("plugin ctx.files adapter", () => {
       );
       expect((await fs.readFile(hostFile)).equals(bytes)).toBe(true);
       await projection.cleanup?.();
+      // Cleanup removes the writable workspace copy and the host staging bytes.
       expect(await fs.readdir(stagedRoot)).toHaveLength(0);
+      await expect(fs.stat(hostFile)).rejects.toThrow(/ENOENT/u);
+      // Idempotent: a repeated cleanup is safe.
+      await projection.cleanup?.();
     } finally {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
       await fs.rm(stagedRoot, { recursive: true, force: true });
@@ -441,6 +445,122 @@ describe("plugin ctx.files adapter", () => {
         await fs.rm(root, { recursive: true, force: true });
       }
     });
+  });
+
+  it("rejects a final-component symlink that escapes the authorized root", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-symlink-"));
+      const outside = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-symlink-out-"));
+      try {
+        await fs.writeFile(path.join(outside, "secret.txt"), "SECRET");
+        await fs.symlink(path.join(outside, "secret.txt"), path.join(root, "link.txt"));
+        const files = createPluginToolFiles({
+          sessionKey: "agent:main:main",
+          sessionId: "sess-link",
+          agentId: "main",
+          projection: localExecutionProjection(root, 1 << 20),
+          maxBytes: 1 << 20,
+        });
+        await expect(
+          files.export({ workspacePath: path.join(root, "link.txt"), contentType: "text/plain" }),
+        ).rejects.toThrow();
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+        await fs.rm(outside, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("rejects an intermediate-directory symlink escape", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-mid-"));
+      const outside = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-mid-out-"));
+      try {
+        await fs.writeFile(path.join(outside, "payload.txt"), "SECRET");
+        await fs.mkdir(path.join(root, "sub"), { recursive: true });
+        await fs.symlink(outside, path.join(root, "sub", "linkdir"));
+        const files = createPluginToolFiles({
+          sessionKey: "agent:main:main",
+          sessionId: "sess-mid",
+          agentId: "main",
+          projection: localExecutionProjection(root, 1 << 20),
+          maxBytes: 1 << 20,
+        });
+        await expect(
+          files.export({
+            workspacePath: path.join(root, "sub", "linkdir", "payload.txt"),
+            contentType: "text/plain",
+          }),
+        ).rejects.toThrow();
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+        await fs.rm(outside, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("rejects a hardlinked file", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-hard-"));
+      const outside = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-hard-out-"));
+      try {
+        await fs.writeFile(path.join(outside, "real.txt"), "SECRET");
+        await fs.link(path.join(outside, "real.txt"), path.join(root, "hard.txt"));
+        const files = createPluginToolFiles({
+          sessionKey: "agent:main:main",
+          sessionId: "sess-hard",
+          agentId: "main",
+          projection: localExecutionProjection(root, 1 << 20),
+          maxBytes: 1 << 20,
+        });
+        await expect(
+          files.export({ workspacePath: path.join(root, "hard.txt"), contentType: "text/plain" }),
+        ).rejects.toThrow();
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+        await fs.rm(outside, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("keeps the durable resource after cleanup removes the workspace copy", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-lifecycle-"));
+      try {
+        const projection = localExecutionProjection(root, 1 << 20);
+        const files = createPluginToolFiles({
+          sessionKey: "agent:main:main",
+          sessionId: "sess-life",
+          agentId: "main",
+          projection,
+          maxBytes: 1 << 20,
+        });
+        const bytes = Buffer.from("durable-bytes");
+        const artifact = await files.importStream({
+          stream: byteStream(bytes),
+          fileName: "d.txt",
+          contentType: "text/plain",
+        });
+        const materialized = await files.materialize({ artifactRef: artifact.artifactRef });
+        expect((await fs.stat(materialized.workspacePath)).isFile()).toBe(true);
+        await projection.cleanup?.();
+        await expect(fs.stat(materialized.workspacePath)).rejects.toThrow(/ENOENT/u);
+        // The durable Session Resource is untouched by run cleanup.
+        const opened = await files.openStream({ artifactRef: artifact.artifactRef });
+        expect((await drain(opened.stream)).equals(bytes)).toBe(true);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("scopes projection staging to the exact session generation", () => {
+    const base = { agentId: "main", sessionKey: "agent:main:main" };
+    const a = resolveSessionResourceProjectionRootDir({ ...base, sessionId: "sess-A" });
+    const b = resolveSessionResourceProjectionRootDir({ ...base, sessionId: "sess-B" });
+    expect(a).not.toBe(b);
+    expect(a).toContain("session-resources");
+    expect(b.startsWith(path.dirname(a))).toBe(true);
   });
 
   it("fails closed for projection without an execution workspace", async () => {

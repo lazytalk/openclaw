@@ -24,22 +24,16 @@ export function createArtifactTools(files: PluginToolFiles): AnyAgentTool[] {
       description:
         "Capture a file confined to the active execution workspace as a new session-retained artifact for upload. Rejects traversal and external paths. Returns an opaque reference and SHA-256, never binary content.",
       parameters: Type.Object({
-        workspacePath: Type.Optional(Type.String()),
-        sandboxPath: Type.Optional(Type.String()),
+        workspacePath: Type.String(),
         fileName: Type.Optional(Type.String()),
       }),
       async execute(_id, input, signal) {
         const params = asNonArrayRecord(input) ?? {};
-        const workspacePath = readToolStringParam(params, "workspacePath");
-        const sandboxPath = readToolStringParam(params, "sandboxPath");
-        if (!workspacePath && !sandboxPath) {
-          throw new Error("workspacePath is required");
-        }
+        const workspacePath = readToolStringParam(params, "workspacePath", { required: true });
         const fileName = readToolStringParam(params, "fileName");
         return jsonResult(
           await files.export({
-            ...(workspacePath ? { workspacePath } : {}),
-            ...(sandboxPath ? { sandboxPath } : {}),
+            workspacePath,
             ...(fileName ? { fileName } : {}),
             signal,
           }),

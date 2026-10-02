@@ -11,6 +11,7 @@ import { mimeTypeFromFilePath } from "@openclaw/media-core/mime";
 import {
   importSessionResourceStream,
   openSessionResourceStream,
+  readSessionResourceMetadata,
   resolveSessionResourceMaxBytes,
   type SessionResourceMetadata,
 } from "../gateway/session-resource-store.js";
@@ -103,41 +104,39 @@ export function createPluginToolFiles(params: {
       if (!params.projection) {
         throw new Error("Active execution workspace required for materialization");
       }
-      const { metadata, stream } = await openSessionResourceStream({
+      // Preflight the trusted durable size before opening a descriptor, so an
+      // oversized request never holds an unread stream open.
+      const preflight = await readSessionResourceMetadata({
+        artifactRef: input.artifactRef,
+        ...source,
+      });
+      if (preflight.size > params.projection.materializeMaxBytes) {
+        throw new Error(
+          `Session resource is ${preflight.size} bytes; this execution projection materializes at most ${params.projection.materializeMaxBytes} bytes`,
+        );
+      }
+      const { stream } = await openSessionResourceStream({
         artifactRef: input.artifactRef,
         maxBytes,
         ...source,
         ...(input.signal ? { signal: input.signal } : {}),
         ...assertCurrentProps,
       });
-      if (metadata.size > params.projection.materializeMaxBytes) {
-        throw new Error(
-          `Session resource is ${metadata.size} bytes; this execution projection materializes at most ${params.projection.materializeMaxBytes} bytes`,
-        );
-      }
       const created = await params.projection.createFromStream(
-        metadata.fileName,
+        preflight.fileName,
         stream,
         input.signal,
       );
-      return {
-        workspacePath: created.workspacePath,
-        sandboxPath: created.workspacePath,
-        backend: params.projection.backend,
-        size: created.size,
-      };
+      return { workspacePath: created.workspacePath, size: created.size };
     },
     async export(input) {
       params.assertCurrent?.();
       if (!params.projection) {
         throw new Error("Active execution workspace required for export");
       }
-      const filePath = input.workspacePath ?? input.sandboxPath;
-      if (
-        !filePath ||
-        (input.workspacePath && input.sandboxPath && input.workspacePath !== input.sandboxPath)
-      ) {
-        throw new Error("Supply one execution workspace path");
+      const filePath = input.workspacePath;
+      if (!filePath) {
+        throw new Error("workspacePath is required");
       }
       const metadata = await importSessionResourceStream({
         ...source,

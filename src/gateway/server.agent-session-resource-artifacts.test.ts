@@ -165,16 +165,22 @@ describe("Gateway session resource artifacts", () => {
         type: "file",
         title: "session-resource.bin",
         mimeType: "application/octet-stream",
+        source: "session-resource",
         download: { mode: "url" },
       });
       await expect(
         client.request("artifacts.get", { sessionKey, artifactId: metadata.artifactRef }),
-      ).resolves.toMatchObject({ artifact: { id: metadata.artifactRef, sessionKey } });
+      ).resolves.toMatchObject({
+        artifact: { id: metadata.artifactRef, sessionKey, source: "session-resource" },
+      });
 
-      const download = await client.request<{ url: string; expiresAt: string }>(
-        "artifacts.download",
-        { sessionKey, artifactId: metadata.artifactRef },
-      );
+      const download = await client.request<{
+        artifact?: { source?: string };
+        url: string;
+        expiresAt: string;
+      }>("artifacts.download", { sessionKey, artifactId: metadata.artifactRef });
+      // The discovery classification stays stable across list/get/download.
+      expect(download.artifact?.source).toBe("session-resource");
       expect(download.url).toContain("mediaTicket=");
       expect(download.expiresAt).toBeTruthy();
       const response = await fetch(`http://127.0.0.1:${port}${download.url}`);
@@ -191,5 +197,26 @@ describe("Gateway session resource artifacts", () => {
     server = await startServer();
     client = await connect("gateway session resource artifacts after restart");
     await assertServed();
+
+    // A physical session replacement (same session key, new session id) must
+    // stop disclosing the previous generation's resource.
+    const nextSessionId = `${sessionId}-next`;
+    await upsertSessionEntryCore(
+      { agentId: "main", sessionId: nextSessionId, sessionKey, storePath },
+      { sessionId: nextSessionId, updatedAt: Date.now() },
+    );
+    const afterReplacement = await client.request<{ artifacts: Array<{ id: string }> }>(
+      "artifacts.list",
+      { sessionKey },
+    );
+    expect(afterReplacement.artifacts.some((entry) => entry.id === metadata.artifactRef)).toBe(
+      false,
+    );
+    await expect(
+      client.request("artifacts.get", { sessionKey, artifactId: metadata.artifactRef }),
+    ).rejects.toThrow(/not found/i);
+    await expect(
+      client.request("artifacts.download", { sessionKey, artifactId: metadata.artifactRef }),
+    ).rejects.toThrow(/not found/i);
   }, 120_000);
 });

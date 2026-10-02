@@ -72,11 +72,10 @@ export type PluginToolFiles = {
   materialize(params: {
     artifactRef: string;
     signal?: AbortSignal;
-  }): Promise<{ workspacePath: string; sandboxPath?: string; backend?: string; size: number }>;
+  }): Promise<{ workspacePath: string; size: number }>;
   /** Publish a file confined to the active execution workspace as a new resource. */
   export(params: {
-    workspacePath?: string;
-    sandboxPath?: string;
+    workspacePath: string;
     fileName?: string;
     contentType?: string;
     maxBytes?: number;

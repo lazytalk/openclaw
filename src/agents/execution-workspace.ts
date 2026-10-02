@@ -11,11 +11,12 @@
  * Providers must bound memory by the chunk size, never by the whole resource.
  */
 import { randomUUID } from "node:crypto";
-import { createReadStream, createWriteStream } from "node:fs";
+import { createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { isPathInside, openLocalFileSafely } from "../infra/fs-safe.js";
 import type { PluginToolFilesBackend } from "../plugins/tool-files.types.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.types.js";
 
@@ -134,12 +135,15 @@ async function resolveInsideRoot(root: string, candidate: string): Promise<strin
   return resolved;
 }
 
-/** Host path backing a container path when the placement exposes a local bind. */
+/**
+ * Host path backing a container path when the placement exposes a local bind.
+ * The root is the workspace host root the opened target must resolve inside.
+ */
 function resolveHostBacking(
   bridge: SandboxFsBridge,
   containerPath: string,
   cwd: string,
-): string | undefined {
+): { target: string; root: string } | undefined {
   try {
     const root = bridge.resolvePath({ filePath: cwd, cwd }).hostPath;
     const target = bridge.resolvePath({ filePath: containerPath, cwd }).hostPath;
@@ -157,33 +161,63 @@ function resolveHostBacking(
     ) {
       return undefined;
     }
-    return resolvedTarget;
+    return { target: resolvedTarget, root: resolvedRoot };
   } catch {
     return undefined;
   }
 }
 
-/** Streams an authorized host backing file without buffering the whole resource. */
-async function* streamHostFile(
-  filePath: string,
-  limit: number,
-  signal?: AbortSignal,
-): AsyncIterable<Uint8Array> {
+/**
+ * Streams bytes from the same safely opened object that was authorized.
+ *
+ * A lexical path check is not an authorization boundary: the entry could be a
+ * symlink, an intermediate-directory symlink, a hardlink, or be replaced after
+ * resolution. This opens the file with OpenClaw's native no-follow safe-open,
+ * proves the canonical target is inside the workspace root, rejects hardlinks
+ * and non-regular files, and only then streams from that exact descriptor.
+ */
+async function* streamSafelyOpenedFile(params: {
+  filePath: string;
+  root: string;
+  limit: number;
+  signal?: AbortSignal;
+}): AsyncIterable<Uint8Array> {
+  const { filePath, root, limit, signal } = params;
   signal?.throwIfAborted();
-  const opened = createReadStream(filePath);
-  let total = 0;
+  const opened = await openLocalFileSafely({ filePath });
   try {
-    for await (const chunk of opened) {
-      signal?.throwIfAborted();
-      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      total += bytes.byteLength;
-      if (total > limit) {
-        throw new Error("Workspace file exceeds byte limit");
+    let realRoot: string;
+    try {
+      realRoot = await fs.realpath(root);
+    } catch {
+      throw new Error("Authorized workspace root is unavailable");
+    }
+    if (!isPathInside(realRoot, opened.realPath)) {
+      throw new Error("Workspace file resolves outside the authorized workspace");
+    }
+    if (!opened.stat.isFile()) {
+      throw new Error("Workspace file is not a regular file");
+    }
+    if (opened.stat.nlink > 1) {
+      throw new Error("Workspace file is hardlinked; refusing to export");
+    }
+    let total = 0;
+    const stream = opened.handle.createReadStream({ autoClose: false });
+    try {
+      for await (const chunk of stream) {
+        signal?.throwIfAborted();
+        const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        total += bytes.byteLength;
+        if (total > limit) {
+          throw new Error("Workspace file exceeds byte limit");
+        }
+        yield bytes;
       }
-      yield bytes;
+    } finally {
+      stream.destroy();
     }
   } finally {
-    opened.destroy();
+    await opened.handle.close().catch(() => undefined);
   }
 }
 
@@ -243,22 +277,7 @@ export function localExecutionProjection(
     },
     async *openReadStream(filePath, limit, signal) {
       const resolved = confineAgainstRoot(resolvedRoot, filePath);
-      signal?.throwIfAborted();
-      const opened = createReadStream(resolved);
-      let total = 0;
-      try {
-        for await (const chunk of opened) {
-          signal?.throwIfAborted();
-          const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-          total += bytes.byteLength;
-          if (total > limit) {
-            throw new Error("Workspace file exceeds byte limit");
-          }
-          yield bytes;
-        }
-      } finally {
-        opened.destroy();
-      }
+      yield* streamSafelyOpenedFile({ filePath: resolved, root: resolvedRoot, limit, signal });
     },
     async cleanup() {
       for (const dir of generated) {
@@ -339,9 +358,14 @@ export function bridgeProjection(
       // authorized bytes can be streamed from the host backing path without
       // buffering. Remote/cloud placements expose no host path and fall through
       // to the backend transfer.
-      const hostTarget = resolveHostBacking(bridge, resolved, cwd);
-      if (hostTarget) {
-        yield* streamHostFile(hostTarget, limit, signal);
+      const hostBacking = resolveHostBacking(bridge, resolved, cwd);
+      if (hostBacking) {
+        yield* streamSafelyOpenedFile({
+          filePath: hostBacking.target,
+          root: hostBacking.root,
+          limit,
+          signal,
+        });
         return;
       }
       if (bridge.readFileStream) {
@@ -408,6 +432,8 @@ export function mountedResourceCopyProjection(params: {
   }
   const base = bridgeProjection(bridge, cwd, maxBytes);
   const stagedHostDirs = new Set<string>();
+  // Workspace copies created by materialize are run-owned and removed by cleanup.
+  const materializedDestinations = new Set<string>();
   const confine = (filePath: string): string => {
     if (filePath.split(/[\\/]/u).includes("..")) {
       throw new Error(
@@ -428,7 +454,9 @@ export function mountedResourceCopyProjection(params: {
   };
   return {
     backend: base.backend,
-    materializeMaxBytes: base.materializeMaxBytes,
+    // Staging is a streaming host copy, so materialize supports the full
+    // resource ceiling; export stays bounded by the bridge read path.
+    materializeMaxBytes: maxBytes,
     exportMaxBytes: base.exportMaxBytes,
     async createFromStream(fileName, stream, signal) {
       assertPlainFileName(fileName);
@@ -462,10 +490,18 @@ export function mountedResourceCopyProjection(params: {
         stagedHostDirs.delete(hostDir);
         throw error;
       }
-      return { workspacePath: confine(relativePath), size };
+      const destination = confine(relativePath);
+      materializedDestinations.add(destination);
+      return { workspacePath: destination, size };
     },
     openReadStream: (filePath, limit, signal) => base.openReadStream(filePath, limit, signal),
     async cleanup() {
+      // Remove the writable workspace copies this projection created, then the
+      // host staging directories. Durable Session Resources are untouched.
+      for (const containerPath of materializedDestinations) {
+        await bridge.remove({ filePath: containerPath, cwd, force: true }).catch(() => undefined);
+      }
+      materializedDestinations.clear();
       await base.cleanup?.();
       for (const hostDir of stagedHostDirs) {
         await fs.rm(hostDir, { recursive: true, force: true }).catch(() => undefined);

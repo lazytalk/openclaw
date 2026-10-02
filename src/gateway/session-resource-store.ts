@@ -143,6 +143,7 @@ export async function buildManagedMediaArtifactDownload(
     title: kind === "image" ? record.alt : (record.original.filename ?? record.alt),
     ...(record.original.contentType ? { mimeType: record.original.contentType } : {}),
     ...(record.original.sizeBytes != null ? { sizeBytes: record.original.sizeBytes } : {}),
+    source: record.retentionClass === "session" ? "session-resource" : "session-transcript",
     url: `${canonicalUrl}?${params.toString()}`,
     expiresAt: ticket.expiresAt,
   };
@@ -351,6 +352,40 @@ export async function importSessionResourceStream(params: {
       throw error;
     }
   });
+}
+
+/**
+ * Read session-resource metadata without opening the byte stream, so callers can
+ * preflight (for example a projection byte ceiling) before acquiring a
+ * descriptor. Authorization mirrors openSessionResourceStream: exact owning
+ * session key and id, with the same retention and kind checks.
+ */
+export async function readSessionResourceMetadata(params: {
+  artifactRef: string;
+  sessionKey: string;
+  sessionId: string;
+  stateDir?: string;
+}): Promise<SessionResourceMetadata> {
+  const parsed = parseManagedOutgoingArtifactId(params.artifactRef);
+  if (!parsed) {
+    throw new Error("Unknown artifact reference");
+  }
+  const stateDir = params.stateDir ?? resolveStateDir();
+  const record = await readManagedImageRecord(parsed.attachmentId, stateDir);
+  if (!record || record.retentionClass !== "session") {
+    throw new Error("Session resource unavailable; import the source again");
+  }
+  if (
+    record.sessionKey !== params.sessionKey.trim() ||
+    record.sessionId !== params.sessionId.trim()
+  ) {
+    throw new Error("Session resource is not owned by the current session");
+  }
+  const kind = resolveManagedMediaKind(record.original.contentType, { allowGeneric: true });
+  if (!kind || (parsed.family === "image") !== (kind === "image")) {
+    throw new Error("Session resource kind mismatch");
+  }
+  return toMetadata(record, kind, record.original.filename ?? record.alt);
 }
 
 /** Open a session-retained resource as a bounded, integrity-checked stream. */

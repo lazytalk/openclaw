@@ -98,6 +98,7 @@ export async function resolveAttemptWorkspaceSandbox(params: WorkspaceSandboxPar
         agentId: sandboxRuntimeStatus.agentId,
         execOverrides: params.execOverrides,
         sessionKey: sandboxSessionKey,
+        sessionId: params.sessionId,
         skillsSnapshot: params.skillsSnapshot,
         workspaceDir: resolvedWorkspace,
         assertCurrent,

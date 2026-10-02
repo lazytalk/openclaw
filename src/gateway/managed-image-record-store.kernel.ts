@@ -179,7 +179,10 @@ function listManagedSessionResourceRecordsInDatabase(
     .selectFrom("managed_outgoing_image_records")
     .select(MANAGED_IMAGE_RECORD_COLUMNS)
     .where("session_key", "=", params.sessionKey)
-    .where("retention_class", "=", "session");
+    .where("retention_class", "=", "session")
+    // A record already claimed for cleanup is not discoverable, matching the
+    // semantics of single-record reads.
+    .where("cleanup_pending", "=", 0);
   if (params.sessionId) {
     query = query.where("session_id", "=", params.sessionId);
   }
