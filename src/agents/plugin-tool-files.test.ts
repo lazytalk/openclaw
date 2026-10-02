@@ -4,14 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
-import {
-  bridgeProjection,
-  localExecutionProjection,
-  mountedResourceCopyProjection,
-  resolveProjectedMount,
-} from "./execution-workspace.js";
+import { bridgeProjection, localExecutionProjection } from "./execution-workspace.js";
 import { createPluginToolFiles } from "./plugin-tool-files.js";
-import { resolveSessionResourceProjectionRootDir } from "./session-resource-projection-paths.js";
 import { createSandboxFsBridgeFromResolver } from "./test-helpers/host-sandbox-fs-bridge.js";
 
 const CONTAINER_ROOT = "/workspace";
@@ -275,76 +269,6 @@ describe("plugin ctx.files adapter", () => {
     }
   });
 
-  it("projects a sandbox resource through the read-only mount and native copy", async () => {
-    const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-mount-ws-"));
-    const stagedRoot = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-mount-staged-"));
-    const mountPath = "/openclaw/attachments";
-    try {
-      const resolvePath = (filePath: string, cwd = CONTAINER_ROOT) => {
-        const normalized = filePath.replace(/\\/gu, "/");
-        if (normalized === mountPath || normalized.startsWith(`${mountPath}/`)) {
-          const relativePath = normalized.slice(mountPath.length).replace(/^\//u, "");
-          return {
-            hostPath: path.join(stagedRoot, relativePath),
-            relativePath,
-            containerPath: relativePath ? `${mountPath}/${relativePath}` : mountPath,
-          };
-        }
-        const containerPath = path.posix.resolve(cwd, filePath);
-        const relativePath = path.posix.relative(CONTAINER_ROOT, containerPath);
-        return {
-          hostPath: path.join(workspaceRoot, relativePath),
-          relativePath,
-          containerPath,
-        };
-      };
-      const base = createSandboxFsBridgeFromResolver(resolvePath, [
-        { hostRoot: workspaceRoot, containerRoot: CONTAINER_ROOT },
-        { hostRoot: stagedRoot, containerRoot: mountPath },
-      ]);
-      let copyFileCalls = 0;
-      let writeFileCalls = 0;
-      const bridge = {
-        ...base,
-        copyFile: async (params: Parameters<NonNullable<typeof base.copyFile>>[0]) => {
-          copyFileCalls += 1;
-          return base.copyFile!(params);
-        },
-        writeFile: async (params: Parameters<typeof base.writeFile>[0]) => {
-          writeFileCalls += 1;
-          return base.writeFile(params);
-        },
-      };
-      expect(resolveProjectedMount(bridge, stagedRoot)).toBe(mountPath);
-      const projection = mountedResourceCopyProjection({
-        bridge,
-        cwd: CONTAINER_ROOT,
-        maxBytes: 1 << 20,
-        projectedRoot: stagedRoot,
-        projectedMount: mountPath,
-      });
-      const bytes = Buffer.from("sandbox-native-copy-no-buffer");
-      const created = await projection.createFromStream("a.txt", byteStream(bytes));
-      expect(copyFileCalls).toBe(1);
-      expect(writeFileCalls).toBe(0);
-      expect(created.size).toBe(bytes.byteLength);
-      const hostFile = path.join(
-        workspaceRoot,
-        path.posix.relative(CONTAINER_ROOT, created.workspacePath),
-      );
-      expect((await fs.readFile(hostFile)).equals(bytes)).toBe(true);
-      await projection.cleanup?.();
-      // Cleanup removes the writable workspace copy and the host staging bytes.
-      expect(await fs.readdir(stagedRoot)).toHaveLength(0);
-      await expect(fs.stat(hostFile)).rejects.toThrow(/ENOENT/u);
-      // Idempotent: a repeated cleanup is safe.
-      await projection.cleanup?.();
-    } finally {
-      await fs.rm(workspaceRoot, { recursive: true, force: true });
-      await fs.rm(stagedRoot, { recursive: true, force: true });
-    }
-  });
-
   it("streams export from the authorized host backing path without bridge reads", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-export-"));
@@ -552,15 +476,6 @@ describe("plugin ctx.files adapter", () => {
         await fs.rm(root, { recursive: true, force: true });
       }
     });
-  });
-
-  it("scopes projection staging to the exact session generation", () => {
-    const base = { agentId: "main", sessionKey: "agent:main:main" };
-    const a = resolveSessionResourceProjectionRootDir({ ...base, sessionId: "sess-A" });
-    const b = resolveSessionResourceProjectionRootDir({ ...base, sessionId: "sess-B" });
-    expect(a).not.toBe(b);
-    expect(a).toContain("session-resources");
-    expect(b.startsWith(path.dirname(a))).toBe(true);
   });
 
   it("fails closed for projection without an execution workspace", async () => {

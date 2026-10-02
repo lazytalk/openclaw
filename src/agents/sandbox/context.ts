@@ -20,10 +20,6 @@ import {
 } from "../admitted-run-context.js";
 import type { ExecPolicyOverrides } from "../exec-defaults.js";
 import {
-  resolveSessionResourceProjectionRootDir,
-  SANDBOX_SESSION_RESOURCES_MOUNT,
-} from "../session-resource-projection-paths.js";
-import {
   resolveSubagentSessionAttachmentRootDir,
   SANDBOX_SUBAGENT_ATTACHMENTS_MOUNT,
 } from "../subagents/subagent-attachment-paths.js";
@@ -222,8 +218,6 @@ type ResolveSandboxContextParams = {
   assertCurrent?: () => void;
   admittedRunContext?: AdmittedRunContext;
   sessionKey?: string;
-  /** Exact native session generation; scopes the session resource projection root. */
-  sessionId?: string;
   skillsSnapshot?: SkillSnapshot;
   workspaceDir?: string;
   /** Classification already prepared for this session's workspace setup. */
@@ -318,43 +312,23 @@ async function resolveProvisionedSandboxContext(
     resolvedCfg.scope === "shared"
       ? undefined
       : await (async () => {
-          const mounts: Array<{ hostPath: string; containerPath: string }> = [];
-          const attachmentPath = resolveSubagentSessionAttachmentRootDir({
+          const hostPath = resolveSubagentSessionAttachmentRootDir({
             agentId: runtime.agentId,
             childSessionKey: rawSessionKey,
           });
           try {
-            if ((await fs.stat(attachmentPath)).isDirectory()) {
-              mounts.push({
-                hostPath: await fs.realpath(attachmentPath),
+            if (!(await fs.stat(hostPath)).isDirectory()) {
+              return undefined;
+            }
+            return [
+              {
+                hostPath: await fs.realpath(hostPath),
                 containerPath: SANDBOX_SUBAGENT_ATTACHMENTS_MOUNT,
-              });
-            }
+              },
+            ];
           } catch {
-            // The attachment mount stays lazy; a missing root is not an error.
+            return undefined;
           }
-          // Session resources are projected read-only so materialize can copy a
-          // canonical resource into the writable execution workspace natively.
-          // The root is scoped to the exact session generation; without a known
-          // sessionId the mount is omitted and materialize fails closed.
-          const sessionId = params.sessionId?.trim();
-          if (sessionId) {
-            const resourcePath = resolveSessionResourceProjectionRootDir({
-              agentId: runtime.agentId,
-              sessionKey: rawSessionKey,
-              sessionId,
-            });
-            try {
-              await fs.mkdir(resourcePath, { recursive: true, mode: 0o700 });
-              mounts.push({
-                hostPath: await fs.realpath(resourcePath),
-                containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
-              });
-            } catch {
-              // A root that cannot be created leaves materialize failing closed.
-            }
-          }
-          return mounts.length ? mounts : undefined;
         })();
 
   const registeredRuntimeIds = await readRegisteredSandboxRuntimeIds({

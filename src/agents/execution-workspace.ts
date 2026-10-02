@@ -11,12 +11,9 @@
  * Providers must bound memory by the chunk size, never by the whole resource.
  */
 import { randomUUID } from "node:crypto";
-import { createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { Readable, Transform } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import { isPathInside, openLocalFileSafely } from "../infra/fs-safe.js";
+import { root as fsSafeRoot, isPathInside, openLocalFileSafely } from "../infra/fs-safe.js";
 import type { PluginToolFilesBackend } from "../plugins/tool-files.types.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.types.js";
 
@@ -71,22 +68,6 @@ function assertPlainFileName(fileName: string): void {
   }
 }
 
-/** Counts bytes and fails past the ceiling without materializing the whole resource. */
-function countingLimit(maxBytes: number, onBytes: (total: number) => void): Transform {
-  let total = 0;
-  return new Transform({
-    transform(chunk: Buffer, _encoding, callback) {
-      total += chunk.byteLength;
-      if (total > maxBytes) {
-        callback(new Error(`Execution workspace write exceeds ${maxBytes} bytes`));
-        return;
-      }
-      onBytes(total);
-      callback(null, chunk);
-    },
-  });
-}
-
 async function collectBounded(
   stream: AsyncIterable<Uint8Array>,
   maxBytes: number,
@@ -106,33 +87,6 @@ async function collectBounded(
     chunks.push(Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
-}
-
-/** Resolves a generated destination and proves it stays inside the workspace root. */
-async function resolveInsideRoot(root: string, candidate: string): Promise<string> {
-  const resolved = path.resolve(candidate);
-  const relative = path.relative(root, resolved);
-  if (
-    !relative ||
-    relative === ".." ||
-    relative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relative)
-  ) {
-    throw new Error("Execution workspace path must stay inside the workspace root");
-  }
-  // Re-check containment after resolving symlinks in the destination parent so a
-  // swapped directory cannot redirect a confined write outside the workspace.
-  const parentReal = await fs.realpath(path.dirname(resolved));
-  const rootedReal = await fs.realpath(root);
-  const parentRelative = path.relative(rootedReal, parentReal);
-  if (
-    parentRelative === ".." ||
-    parentRelative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(parentRelative)
-  ) {
-    throw new Error("Execution workspace path must stay inside the workspace root");
-  }
-  return resolved;
 }
 
 /**
@@ -254,26 +208,56 @@ export function localExecutionProjection(
     exportMaxBytes: maxBytes,
     async createFromStream(fileName, stream, signal) {
       assertPlainFileName(fileName);
-      const dir = path.join(resolvedRoot, WORKSPACE_SUBDIR, randomUUID());
-      await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-      const destination = await resolveInsideRoot(resolvedRoot, path.join(dir, fileName));
+      const id = randomUUID();
+      const dir = path.join(resolvedRoot, WORKSPACE_SUBDIR, id);
+      const relativeFile = path.posix.join(WORKSPACE_SUBDIR, id, fileName);
       signal?.throwIfAborted();
+      // Open the destination through the native safe-write boundary: mutations
+      // reject symlinks and stay anchored to the workspace root, so a swapped
+      // parent directory cannot redirect the write outside the workspace.
+      const safeRoot = await fsSafeRoot(resolvedRoot, {
+        mutationSymlinks: "reject",
+        mkdir: true,
+        mode: 0o600,
+      });
+      let opened: Awaited<ReturnType<typeof safeRoot.openWritable>> | undefined;
       let size = 0;
       try {
-        await pipeline(
-          Readable.from(stream),
-          countingLimit(maxBytes, (total) => {
-            size = total;
-          }),
-          createWriteStream(destination, { mode: 0o600 }),
-          { signal },
-        );
+        opened = await safeRoot.openWritable(relativeFile, {
+          writeMode: "replace",
+          mkdir: true,
+          mode: 0o600,
+        });
+        for await (const chunk of stream) {
+          signal?.throwIfAborted();
+          if (!(chunk instanceof Uint8Array)) {
+            throw new Error("Execution workspace write requires byte chunks");
+          }
+          size += chunk.byteLength;
+          if (size > maxBytes) {
+            throw new Error(`Execution workspace write exceeds ${maxBytes} bytes`);
+          }
+          let offset = 0;
+          while (offset < chunk.byteLength) {
+            const { bytesWritten } = await opened.handle.write(
+              chunk,
+              offset,
+              chunk.byteLength - offset,
+            );
+            if (bytesWritten <= 0) {
+              throw new Error("Execution workspace write stalled");
+            }
+            offset += bytesWritten;
+          }
+        }
       } catch (error) {
         await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
         throw error;
+      } finally {
+        await opened?.handle.close().catch(() => undefined);
       }
       generated.add(dir);
-      return { workspacePath: destination, size };
+      return { workspacePath: path.join(resolvedRoot, relativeFile), size };
     },
     async *openReadStream(filePath, limit, signal) {
       const resolved = confineAgainstRoot(resolvedRoot, filePath);
@@ -399,118 +383,6 @@ export function bridgeProjection(
   };
 }
 
-/** Container path where the placement projected `hostRoot` read-only, if any. */
-export function resolveProjectedMount(
-  bridge: SandboxFsBridge,
-  hostRoot: string,
-): string | undefined {
-  const target = path.resolve(hostRoot);
-  return bridge.pathMappings?.find((mapping) => path.resolve(mapping.hostRoot) === target)
-    ?.containerRoot;
-}
-
-/**
- * Sandbox projection over a placement-owned read-only resource mount.
- *
- * The canonical bytes are staged host-side with a streaming copy, then the
- * placement bridge copies them into the writable execution workspace with its
- * native copy. This avoids both whole-file Buffering and command-stdin
- * streaming. The caller must only use this when `resolveProjectedMount` proves
- * the staging root is projected into the sandbox.
- */
-export function mountedResourceCopyProjection(params: {
-  bridge: SandboxFsBridge;
-  cwd: string;
-  maxBytes: number;
-  projectedRoot: string;
-  projectedMount: string;
-}): SessionResourceProjection {
-  const { bridge, cwd, maxBytes, projectedRoot, projectedMount } = params;
-  const copyFile = bridge.copyFile?.bind(bridge);
-  if (!copyFile) {
-    throw new Error("Placement mount projection requires a native copy primitive");
-  }
-  const base = bridgeProjection(bridge, cwd, maxBytes);
-  const stagedHostDirs = new Set<string>();
-  // Workspace copies created by materialize are run-owned and removed by cleanup.
-  const materializedDestinations = new Set<string>();
-  const confine = (filePath: string): string => {
-    if (filePath.split(/[\\/]/u).includes("..")) {
-      throw new Error(
-        "Session resource path traversal outside the execution workspace is forbidden",
-      );
-    }
-    const resolved = bridge.resolvePath({ filePath, cwd }).containerPath;
-    const relative = path.posix.relative(cwd, resolved);
-    if (
-      !relative ||
-      relative === ".." ||
-      relative.startsWith("../") ||
-      path.posix.isAbsolute(relative)
-    ) {
-      throw new Error("Session resource export must stay inside the active execution workspace");
-    }
-    return resolved;
-  };
-  return {
-    backend: base.backend,
-    // Staging is a streaming host copy, so materialize supports the full
-    // resource ceiling; export stays bounded by the bridge read path.
-    materializeMaxBytes: maxBytes,
-    exportMaxBytes: base.exportMaxBytes,
-    async createFromStream(fileName, stream, signal) {
-      assertPlainFileName(fileName);
-      const id = randomUUID();
-      const hostDir = path.join(projectedRoot, id);
-      const hostFile = path.join(hostDir, fileName);
-      await fs.mkdir(hostDir, { recursive: true, mode: 0o700 });
-      stagedHostDirs.add(hostDir);
-      let size = 0;
-      const relativePath = path.posix.join(WORKSPACE_SUBDIR, randomUUID(), fileName);
-      try {
-        signal?.throwIfAborted();
-        await pipeline(
-          Readable.from(stream),
-          countingLimit(maxBytes, (total) => {
-            size = total;
-          }),
-          createWriteStream(hostFile, { mode: 0o600 }),
-          { signal },
-        );
-        signal?.throwIfAborted();
-        await copyFile({
-          sourcePath: path.posix.join(projectedMount, id, fileName),
-          destinationPath: relativePath,
-          cwd,
-          mkdir: true,
-          signal,
-        });
-      } catch (error) {
-        await fs.rm(hostDir, { recursive: true, force: true }).catch(() => undefined);
-        stagedHostDirs.delete(hostDir);
-        throw error;
-      }
-      const destination = confine(relativePath);
-      materializedDestinations.add(destination);
-      return { workspacePath: destination, size };
-    },
-    openReadStream: (filePath, limit, signal) => base.openReadStream(filePath, limit, signal),
-    async cleanup() {
-      // Remove the writable workspace copies this projection created, then the
-      // host staging directories. Durable Session Resources are untouched.
-      for (const containerPath of materializedDestinations) {
-        await bridge.remove({ filePath: containerPath, cwd, force: true }).catch(() => undefined);
-      }
-      materializedDestinations.clear();
-      await base.cleanup?.();
-      for (const hostDir of stagedHostDirs) {
-        await fs.rm(hostDir, { recursive: true, force: true }).catch(() => undefined);
-      }
-      stagedHostDirs.clear();
-    },
-  };
-}
-
 /**
  * Resolve the projection for the current placement. The host supplies the
  * decided placement; this helper only adapts it and is not consulted by the
@@ -520,24 +392,9 @@ export function resolveSessionResourceProjection(params: {
   bridge?: SandboxFsBridge;
   cwd?: string;
   workspaceRoot?: string;
-  /** Placement-owned host root projected read-only into the sandbox, when present. */
-  projectedRoot?: string;
   maxBytes: number;
 }): SessionResourceProjection | undefined {
   if (params.bridge && params.cwd) {
-    const projectedRoot = params.projectedRoot?.trim();
-    if (projectedRoot) {
-      const mount = resolveProjectedMount(params.bridge, projectedRoot);
-      if (mount) {
-        return mountedResourceCopyProjection({
-          bridge: params.bridge,
-          cwd: params.cwd,
-          maxBytes: params.maxBytes,
-          projectedRoot,
-          projectedMount: mount,
-        });
-      }
-    }
     return bridgeProjection(params.bridge, params.cwd, params.maxBytes);
   }
   const root = params.workspaceRoot?.trim();

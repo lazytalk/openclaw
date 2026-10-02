@@ -6,10 +6,6 @@ import type { OpenClawConfig } from "../config/config.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { registerSandboxBackend } from "./sandbox/backend.js";
 import { resolveSandboxContext } from "./sandbox/context.js";
-import {
-  resolveSessionResourceProjectionRootDir,
-  SANDBOX_SESSION_RESOURCES_MOUNT,
-} from "./session-resource-projection-paths.js";
 import { resolveSubagentSessionAttachmentRootDir } from "./subagents/subagent-attachment-paths.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -19,8 +15,6 @@ it("isolates a session attachment projection from sibling agent-scoped sessions"
   const workspaceDir = path.join(stateDir, "workspace");
   const attachedSessionKey = "agent:main:subagent:attached";
   const siblingSessionKey = "agent:main:subagent:sibling";
-  const attachedSessionId = "sess-attached";
-  const siblingSessionId = "sess-sibling";
   const attachmentRoot = resolveSubagentSessionAttachmentRootDir({
     agentId: "main",
     childSessionKey: attachedSessionKey,
@@ -66,38 +60,19 @@ it("isolates a session attachment projection from sibling agent-scoped sessions"
       const beforeAttachment = await resolveSandboxContext({
         config: cfg,
         sessionKey: attachedSessionKey,
-        sessionId: attachedSessionId,
         workspaceDir,
       });
-      const resourceRootFor = (sessionKey: string, sessionId: string) =>
-        fs.realpath(
-          resolveSessionResourceProjectionRootDir({
-            agentId: "main",
-            sessionKey,
-            sessionId,
-            env: { ...process.env, OPENCLAW_STATE_DIR: stateDir },
-          }),
-        );
-      // The session resource projection root is always mounted so materialize can
-      // copy a canonical resource into the workspace natively.
-      expect(beforeAttachment?.readOnlyResourceMounts).toEqual([
-        {
-          hostPath: await resourceRootFor(attachedSessionKey, attachedSessionId),
-          containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
-        },
-      ]);
+      expect(beforeAttachment?.readOnlyResourceMounts).toBeUndefined();
       await fs.mkdir(attachmentRoot, { recursive: true });
       await fs.writeFile(path.join(attachmentRoot, "proof.txt"), "authorized");
       const attached = await resolveSandboxContext({
         config: cfg,
         sessionKey: attachedSessionKey,
-        sessionId: attachedSessionId,
         workspaceDir,
       });
       const sibling = await resolveSandboxContext({
         config: cfg,
         sessionKey: siblingSessionKey,
-        sessionId: siblingSessionId,
         workspaceDir,
       });
 
@@ -106,24 +81,15 @@ it("isolates a session attachment projection from sibling agent-scoped sessions"
           hostPath: await fs.realpath(attachmentRoot),
           containerPath: "/openclaw/attachments",
         },
-        {
-          hostPath: await resourceRootFor(attachedSessionKey, attachedSessionId),
-          containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
-        },
       ]);
-      expect(sibling?.readOnlyResourceMounts).toEqual([
-        {
-          hostPath: await resourceRootFor(siblingSessionKey, siblingSessionId),
-          containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
-        },
-      ]);
+      expect(sibling?.readOnlyResourceMounts).toBeUndefined();
       const [beforeCall, attachedCall, siblingCall] = backendFactory.mock.calls.map(
         ([call]) => call,
       );
       expect(beforeCall?.scopeKey).toBe(siblingCall?.scopeKey);
       expect(attachedCall?.scopeKey).not.toBe(siblingCall?.scopeKey);
-      expect(attachedCall?.readOnlyResourceMounts).toHaveLength(2);
-      expect(siblingCall?.readOnlyResourceMounts).toHaveLength(1);
+      expect(attachedCall?.readOnlyResourceMounts).toHaveLength(1);
+      expect(siblingCall?.readOnlyResourceMounts).toBeUndefined();
     });
   } finally {
     restore();
