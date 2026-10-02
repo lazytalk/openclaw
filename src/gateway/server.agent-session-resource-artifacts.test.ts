@@ -78,7 +78,7 @@ describe("Gateway session resource artifacts", () => {
       `${JSON.stringify(
         {
           gateway: { auth: { mode: "token", token } },
-          agents: { entries: { main: { default: true, workspace } } },
+          agents: { entries: { main: { workspace } } },
         },
         null,
         2,
