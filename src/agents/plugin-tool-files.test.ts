@@ -171,11 +171,13 @@ describe("plugin ctx.files adapter", () => {
         });
         expect(sandboxed.capabilities).toEqual({
           contractVersion: 3,
-          streaming: true,
-          maxBytes: 4096,
-          materialize: true,
-          export: true,
-          backend: "sandbox",
+          resource: { streamingImport: true, streamingOpen: true, maxBytes: 4096 },
+          projection: {
+            materialize: true,
+            materializeMaxBytes: 4096,
+            export: true,
+            exportMaxBytes: 4096,
+          },
         });
         const unavailable = createPluginToolFiles({
           sessionKey: "agent:main:main",
@@ -184,10 +186,8 @@ describe("plugin ctx.files adapter", () => {
           maxBytes: 4096,
         });
         expect(unavailable.capabilities).toMatchObject({
-          backend: "unavailable",
-          materialize: false,
-          export: false,
-          streaming: true,
+          resource: { streamingImport: true, streamingOpen: true, maxBytes: 4096 },
+          projection: { materialize: false, export: false },
         });
       } finally {
         await fs.rm(root, { recursive: true, force: true });
@@ -206,7 +206,12 @@ describe("plugin ctx.files adapter", () => {
           projection: localExecutionProjection(root, 1 << 20),
           maxBytes: 1 << 20,
         });
-        expect(files.capabilities.backend).toBe("host");
+        expect(files.capabilities.projection).toEqual({
+          materialize: true,
+          materializeMaxBytes: 1 << 20,
+          export: true,
+          exportMaxBytes: 1 << 20,
+        });
         const bytes = Buffer.from("local-placement-bytes");
         const artifact = await files.importStream({
           stream: byteStream(bytes),
@@ -334,6 +339,108 @@ describe("plugin ctx.files adapter", () => {
       await fs.rm(workspaceRoot, { recursive: true, force: true });
       await fs.rm(stagedRoot, { recursive: true, force: true });
     }
+  });
+
+  it("streams export from the authorized host backing path without bridge reads", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-export-"));
+      try {
+        const base = bridgeFor(root);
+        let readFileCalls = 0;
+        const bridge = {
+          ...base,
+          readFile: async (params: Parameters<typeof base.readFile>[0]) => {
+            readFileCalls += 1;
+            return base.readFile(params);
+          },
+        };
+        const files = createPluginToolFiles({
+          sessionKey: "agent:main:main",
+          sessionId: "sess-export",
+          agentId: "main",
+          projection: bridgeProjection(bridge, CONTAINER_ROOT, 1 << 20),
+          maxBytes: 1 << 20,
+        });
+        const big = Buffer.alloc(150 * 1024, 7);
+        await fs.writeFile(path.join(root, "big.bin"), big);
+        const exported = await files.export({
+          workspacePath: `${CONTAINER_ROOT}/big.bin`,
+          contentType: "application/octet-stream",
+        });
+        expect(exported.size).toBe(big.byteLength);
+        expect(readFileCalls).toBe(0);
+        const opened = await files.openStream({ artifactRef: exported.artifactRef });
+        expect((await drain(opened.stream)).equals(big)).toBe(true);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("keeps resource capacity independent of a bounded projection", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-split-"));
+      try {
+        const MIB = 1024 * 1024;
+        // A buffered bridge (no streaming primitives) cannot declare the full
+        // resource ceiling for projection.
+        const files = createPluginToolFiles({
+          sessionKey: "agent:main:main",
+          sessionId: "sess-1",
+          agentId: "main",
+          projection: bridgeProjection(bridgeFor(root), CONTAINER_ROOT, 100 * MIB),
+          maxBytes: 100 * MIB,
+        });
+        expect(files.capabilities.resource.maxBytes).toBe(100 * MIB);
+        expect(files.capabilities.projection.materializeMaxBytes).toBe(50 * MIB);
+        expect(files.capabilities.projection.exportMaxBytes).toBe(50 * MIB);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("refuses an oversized materialize explicitly and keeps the resource readable", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-over-"));
+      try {
+        let createCalled = false;
+        const projection = {
+          backend: "sandbox" as const,
+          materializeMaxBytes: 4,
+          exportMaxBytes: 4,
+          async createFromStream() {
+            createCalled = true;
+            return { workspacePath: "/workspace/should-not-happen", size: 0 };
+          },
+          async *openReadStream() {
+            yield Buffer.alloc(0);
+          },
+        };
+        const files = createPluginToolFiles({
+          sessionKey: "agent:main:main",
+          sessionId: "sess-over",
+          agentId: "main",
+          projection,
+          maxBytes: 1 << 20,
+        });
+        const bytes = Buffer.from("sixteen-bytes-ok");
+        const artifact = await files.importStream({
+          stream: byteStream(bytes),
+          fileName: "over.bin",
+          contentType: "application/octet-stream",
+        });
+        await expect(files.materialize({ artifactRef: artifact.artifactRef })).rejects.toThrow(
+          /materializes at most 4 bytes/u,
+        );
+        expect(createCalled).toBe(false);
+        // The refusal does not damage the durable resource.
+        const opened = await files.openStream({ artifactRef: artifact.artifactRef });
+        expect((await drain(opened.stream)).equals(bytes)).toBe(true);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    });
   });
 
   it("fails closed for projection without an execution workspace", async () => {

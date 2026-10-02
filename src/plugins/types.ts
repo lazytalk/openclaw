@@ -80,6 +80,8 @@ export type {
   PluginToolFiles,
   PluginToolFilesBackend,
   PluginToolFilesCapabilities,
+  PluginToolFilesProjectionCapability,
+  PluginToolFilesResourceCapability,
 } from "./tool-files.types.js";
 export type {
   OpenClawPluginNodeHostCommand,

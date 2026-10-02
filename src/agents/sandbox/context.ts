@@ -20,6 +20,10 @@ import {
 } from "../admitted-run-context.js";
 import type { ExecPolicyOverrides } from "../exec-defaults.js";
 import {
+  resolveSessionResourceProjectionRootDir,
+  SANDBOX_SESSION_RESOURCES_MOUNT,
+} from "../session-resource-projection-paths.js";
+import {
   resolveSubagentSessionAttachmentRootDir,
   SANDBOX_SUBAGENT_ATTACHMENTS_MOUNT,
 } from "../subagents/subagent-attachment-paths.js";
@@ -312,23 +316,38 @@ async function resolveProvisionedSandboxContext(
     resolvedCfg.scope === "shared"
       ? undefined
       : await (async () => {
-          const hostPath = resolveSubagentSessionAttachmentRootDir({
+          const mounts: Array<{ hostPath: string; containerPath: string }> = [];
+          const attachmentPath = resolveSubagentSessionAttachmentRootDir({
             agentId: runtime.agentId,
             childSessionKey: rawSessionKey,
           });
           try {
-            if (!(await fs.stat(hostPath)).isDirectory()) {
-              return undefined;
-            }
-            return [
-              {
-                hostPath: await fs.realpath(hostPath),
+            if ((await fs.stat(attachmentPath)).isDirectory()) {
+              mounts.push({
+                hostPath: await fs.realpath(attachmentPath),
                 containerPath: SANDBOX_SUBAGENT_ATTACHMENTS_MOUNT,
-              },
-            ];
+              });
+            }
           } catch {
-            return undefined;
+            // The attachment mount stays lazy; a missing root is not an error.
           }
+          // Session resources are projected read-only so materialize can copy a
+          // canonical resource into the writable execution workspace natively.
+          // The root is created so the mount is present for the whole run.
+          const resourcePath = resolveSessionResourceProjectionRootDir({
+            agentId: runtime.agentId,
+            sessionKey: rawSessionKey,
+          });
+          try {
+            await fs.mkdir(resourcePath, { recursive: true, mode: 0o700 });
+            mounts.push({
+              hostPath: await fs.realpath(resourcePath),
+              containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
+            });
+          } catch {
+            // A root that cannot be created leaves materialize failing closed.
+          }
+          return mounts.length ? mounts : undefined;
         })();
 
   const registeredRuntimeIds = await readRegisteredSandboxRuntimeIds({

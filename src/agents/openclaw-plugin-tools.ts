@@ -40,7 +40,7 @@ import {
 import { createPluginToolFiles } from "./plugin-tool-files.js";
 import type { PreparedModelRuntimeSnapshot } from "./prepared-model-runtime.types.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.types.js";
-import { resolveSubagentSessionAttachmentRootDir } from "./subagents/subagent-attachment-paths.js";
+import { resolveSessionResourceProjectionRootDir } from "./session-resource-projection-paths.js";
 import { resolveAgentRuntimeToolConfig } from "./tool-runtime-config.js";
 import { createArtifactTools } from "./tools/artifact-tools.js";
 import type { AnyAgentTool } from "./tools/common.js";
@@ -356,9 +356,9 @@ export function resolveOpenClawPluginToolsForOptions(params: {
   // The placement-owned host root projected read-only into a sandbox, when present.
   const projectedRoot =
     context.agentId && context.sessionKey
-      ? resolveSubagentSessionAttachmentRootDir({
+      ? resolveSessionResourceProjectionRootDir({
           agentId: context.agentId,
-          childSessionKey: context.sessionKey,
+          sessionKey: context.sessionKey,
         })
       : undefined;
   const projection =

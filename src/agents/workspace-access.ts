@@ -158,6 +158,8 @@ export function registerAgentWorkspaceAccess(
   if (sessionResources) {
     boundAccess.sessionResources = Object.freeze<SessionResourceProjection>({
       backend: sessionResources.backend,
+      materializeMaxBytes: sessionResources.materializeMaxBytes,
+      exportMaxBytes: sessionResources.exportMaxBytes,
       createFromStream: guardCall(
         (...args: Parameters<SessionResourceProjection["createFromStream"]>) =>
           sessionResources.createFromStream(...args),

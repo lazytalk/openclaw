@@ -6,6 +6,10 @@ import type { OpenClawConfig } from "../config/config.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { registerSandboxBackend } from "./sandbox/backend.js";
 import { resolveSandboxContext } from "./sandbox/context.js";
+import {
+  resolveSessionResourceProjectionRootDir,
+  SANDBOX_SESSION_RESOURCES_MOUNT,
+} from "./session-resource-projection-paths.js";
 import { resolveSubagentSessionAttachmentRootDir } from "./subagents/subagent-attachment-paths.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -62,7 +66,22 @@ it("isolates a session attachment projection from sibling agent-scoped sessions"
         sessionKey: attachedSessionKey,
         workspaceDir,
       });
-      expect(beforeAttachment?.readOnlyResourceMounts).toBeUndefined();
+      const resourceRootFor = (sessionKey: string) =>
+        fs.realpath(
+          resolveSessionResourceProjectionRootDir({
+            agentId: "main",
+            sessionKey,
+            env: { ...process.env, OPENCLAW_STATE_DIR: stateDir },
+          }),
+        );
+      // The session resource projection root is always mounted so materialize can
+      // copy a canonical resource into the workspace natively.
+      expect(beforeAttachment?.readOnlyResourceMounts).toEqual([
+        {
+          hostPath: await resourceRootFor(attachedSessionKey),
+          containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
+        },
+      ]);
       await fs.mkdir(attachmentRoot, { recursive: true });
       await fs.writeFile(path.join(attachmentRoot, "proof.txt"), "authorized");
       const attached = await resolveSandboxContext({
@@ -81,15 +100,24 @@ it("isolates a session attachment projection from sibling agent-scoped sessions"
           hostPath: await fs.realpath(attachmentRoot),
           containerPath: "/openclaw/attachments",
         },
+        {
+          hostPath: await resourceRootFor(attachedSessionKey),
+          containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
+        },
       ]);
-      expect(sibling?.readOnlyResourceMounts).toBeUndefined();
+      expect(sibling?.readOnlyResourceMounts).toEqual([
+        {
+          hostPath: await resourceRootFor(siblingSessionKey),
+          containerPath: SANDBOX_SESSION_RESOURCES_MOUNT,
+        },
+      ]);
       const [beforeCall, attachedCall, siblingCall] = backendFactory.mock.calls.map(
         ([call]) => call,
       );
       expect(beforeCall?.scopeKey).toBe(siblingCall?.scopeKey);
       expect(attachedCall?.scopeKey).not.toBe(siblingCall?.scopeKey);
-      expect(attachedCall?.readOnlyResourceMounts).toHaveLength(1);
-      expect(siblingCall?.readOnlyResourceMounts).toBeUndefined();
+      expect(attachedCall?.readOnlyResourceMounts).toHaveLength(2);
+      expect(siblingCall?.readOnlyResourceMounts).toHaveLength(1);
     });
   } finally {
     restore();

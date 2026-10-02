@@ -21,10 +21,21 @@ import type { SandboxFsBridge } from "./sandbox/fs-bridge.types.js";
 
 const WORKSPACE_SUBDIR = ".openclaw-session-resources";
 
+/**
+ * Bounded ceiling for a projection that must fall back to a whole-file bridge
+ * transfer. A backend that can stream declares the resource ceiling instead;
+ * this keeps a buffered backend honest rather than silently accepting 512 MiB.
+ */
+export const DEFAULT_BUFFERED_PROJECTION_MAX_BYTES = 50 * 1024 * 1024;
+
 /** Placement-neutral projection for session-retained resources and exports. */
 export type SessionResourceProjection = {
-  /** Execution placement label reported as negotiation metadata (never authority). */
+  /** Execution placement label for diagnostics; never part of the provider contract. */
   readonly backend: PluginToolFilesBackend;
+  /** Own byte ceiling for materialize; may be below the Session Resource ceiling. */
+  readonly materializeMaxBytes: number;
+  /** Own byte ceiling for export; may be below the Session Resource ceiling. */
+  readonly exportMaxBytes: number;
   /** Stream bytes into a generated workspace file; returns the execution path. */
   createFromStream(
     fileName: string,
@@ -123,6 +134,59 @@ async function resolveInsideRoot(root: string, candidate: string): Promise<strin
   return resolved;
 }
 
+/** Host path backing a container path when the placement exposes a local bind. */
+function resolveHostBacking(
+  bridge: SandboxFsBridge,
+  containerPath: string,
+  cwd: string,
+): string | undefined {
+  try {
+    const root = bridge.resolvePath({ filePath: cwd, cwd }).hostPath;
+    const target = bridge.resolvePath({ filePath: containerPath, cwd }).hostPath;
+    if (!root || !target) {
+      return undefined;
+    }
+    const resolvedRoot = path.resolve(root);
+    const resolvedTarget = path.resolve(target);
+    const relative = path.relative(resolvedRoot, resolvedTarget);
+    if (
+      !relative ||
+      relative === ".." ||
+      relative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relative)
+    ) {
+      return undefined;
+    }
+    return resolvedTarget;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Streams an authorized host backing file without buffering the whole resource. */
+async function* streamHostFile(
+  filePath: string,
+  limit: number,
+  signal?: AbortSignal,
+): AsyncIterable<Uint8Array> {
+  signal?.throwIfAborted();
+  const opened = createReadStream(filePath);
+  let total = 0;
+  try {
+    for await (const chunk of opened) {
+      signal?.throwIfAborted();
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += bytes.byteLength;
+      if (total > limit) {
+        throw new Error("Workspace file exceeds byte limit");
+      }
+      yield bytes;
+    }
+  } finally {
+    opened.destroy();
+  }
+}
+
 function confineAgainstRoot(root: string, filePath: string): string {
   if (filePath.split(/[\\/]/u).includes("..")) {
     throw new Error("Session resource path traversal outside the execution workspace is forbidden");
@@ -152,6 +216,8 @@ export function localExecutionProjection(
   const generated = new Set<string>();
   return {
     backend: "host",
+    materializeMaxBytes: maxBytes,
+    exportMaxBytes: maxBytes,
     async createFromStream(fileName, stream, signal) {
       assertPlainFileName(fileName);
       const dir = path.join(resolvedRoot, WORKSPACE_SUBDIR, randomUUID());
@@ -232,8 +298,16 @@ export function bridgeProjection(
     }
     return resolved;
   };
+  // A streaming bridge keeps the resource ceiling; a buffered fallback reports
+  // its own bounded ceiling instead of silently accepting whole-file buffers.
+  const bounded = bridge.writeFileStream && bridge.readFileStream;
+  const projectionMaxBytes = bounded
+    ? maxBytes
+    : Math.min(maxBytes, DEFAULT_BUFFERED_PROJECTION_MAX_BYTES);
   return {
     backend: "sandbox",
+    materializeMaxBytes: projectionMaxBytes,
+    exportMaxBytes: projectionMaxBytes,
     async createFromStream(fileName, stream, signal) {
       assertPlainFileName(fileName);
       const relativePath = path.posix.join(WORKSPACE_SUBDIR, randomUUID(), fileName);
@@ -246,11 +320,11 @@ export function bridgeProjection(
           cwd,
           stream,
           mkdir: true,
-          maxBytes,
+          maxBytes: projectionMaxBytes,
           signal,
         });
       } else {
-        const bytes = await collectBounded(stream, maxBytes, signal);
+        const bytes = await collectBounded(stream, projectionMaxBytes, signal);
         signal?.throwIfAborted();
         await bridge.writeFile({ filePath: relativePath, cwd, data: bytes, mkdir: true, signal });
         size = bytes.byteLength;
@@ -261,13 +335,33 @@ export function bridgeProjection(
     async *openReadStream(filePath, limit, signal) {
       const resolved = confine(filePath);
       signal?.throwIfAborted();
-      if (bridge.readFileStream) {
-        yield* bridge.readFileStream({ filePath: resolved, cwd, maxBytes: limit, signal });
+      // A local placement bind-mounts the workspace from the host, so the same
+      // authorized bytes can be streamed from the host backing path without
+      // buffering. Remote/cloud placements expose no host path and fall through
+      // to the backend transfer.
+      const hostTarget = resolveHostBacking(bridge, resolved, cwd);
+      if (hostTarget) {
+        yield* streamHostFile(hostTarget, limit, signal);
         return;
       }
-      const data = await bridge.readFile({ filePath: resolved, cwd, maxBytes: limit, signal });
+      if (bridge.readFileStream) {
+        yield* bridge.readFileStream({
+          filePath: resolved,
+          cwd,
+          maxBytes: Math.min(limit, projectionMaxBytes),
+          signal,
+        });
+        return;
+      }
+      const boundedLimit = Math.min(limit, projectionMaxBytes);
+      const data = await bridge.readFile({
+        filePath: resolved,
+        cwd,
+        maxBytes: boundedLimit,
+        signal,
+      });
       signal?.throwIfAborted();
-      if (data.byteLength > limit) {
+      if (data.byteLength > boundedLimit) {
         throw new Error("Workspace file exceeds byte limit");
       }
       yield data;
@@ -334,6 +428,8 @@ export function mountedResourceCopyProjection(params: {
   };
   return {
     backend: base.backend,
+    materializeMaxBytes: base.materializeMaxBytes,
+    exportMaxBytes: base.exportMaxBytes,
     async createFromStream(fileName, stream, signal) {
       assertPlainFileName(fileName);
       const id = randomUUID();

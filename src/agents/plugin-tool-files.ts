@@ -17,7 +17,6 @@ import {
 import type {
   PluginArtifact,
   PluginToolFiles,
-  PluginToolFilesBackend,
   PluginToolFilesCapabilities,
 } from "../plugins/tool-files.types.js";
 import type { SessionResourceProjection } from "./execution-workspace.js";
@@ -59,16 +58,19 @@ export function createPluginToolFiles(params: {
   });
   const assertCurrentProps = params.assertCurrent ? { assertCurrent: params.assertCurrent } : {};
   const effectiveMax = (requested: number | undefined) => clampBytes(requested, maxBytes);
-  // Placement is delegated: this layer only reports the effective projection
-  // capability it was handed, never how sandbox/host/remote access is performed.
-  const backend: PluginToolFilesBackend = params.projection?.backend ?? "unavailable";
+  // Placement is delegated: this layer reports Session Resource capacity and the
+  // current execution projection capacity separately, never the backend identity.
   const capabilities: PluginToolFilesCapabilities = {
     contractVersion: 3,
-    streaming: true,
-    maxBytes,
-    materialize: Boolean(params.projection),
-    export: Boolean(params.projection),
-    backend,
+    resource: { streamingImport: true, streamingOpen: true, maxBytes },
+    projection: params.projection
+      ? {
+          materialize: true,
+          materializeMaxBytes: params.projection.materializeMaxBytes,
+          export: true,
+          exportMaxBytes: params.projection.exportMaxBytes,
+        }
+      : { materialize: false, materializeMaxBytes: 0, export: false, exportMaxBytes: 0 },
   };
   const files: PluginToolFiles = {
     capabilities,
@@ -108,6 +110,11 @@ export function createPluginToolFiles(params: {
         ...(input.signal ? { signal: input.signal } : {}),
         ...assertCurrentProps,
       });
+      if (metadata.size > params.projection.materializeMaxBytes) {
+        throw new Error(
+          `Session resource is ${metadata.size} bytes; this execution projection materializes at most ${params.projection.materializeMaxBytes} bytes`,
+        );
+      }
       const created = await params.projection.createFromStream(
         metadata.fileName,
         stream,

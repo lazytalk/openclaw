@@ -13,20 +13,36 @@ export type PluginArtifact = Readonly<{
   sha256: string;
 }>;
 
-/** Execution placement behind a delegated session resource projection. Negotiation metadata. */
+/** Internal placement label; never part of the provider-facing capability contract. */
 export type PluginToolFilesBackend = "sandbox" | "host" | "remote" | "cloud" | "unavailable";
 
+/** Durable Session Resource capacity: independent of any execution projection. */
+export type PluginToolFilesResourceCapability = Readonly<{
+  streamingImport: true;
+  streamingOpen: true;
+  maxBytes: number;
+}>;
+
 /**
- * Effective limits and projection availability for the current placement. This is
+ * Current execution projection capacity. A projection may be bounded well below
+ * the resource ceiling; providers ask "can this be materialized here" instead of
+ * inferring the execution placement.
+ */
+export type PluginToolFilesProjectionCapability = Readonly<{
+  materialize: boolean;
+  materializeMaxBytes: number;
+  export: boolean;
+  exportMaxBytes: number;
+}>;
+
+/**
+ * Effective Session Resource and execution projection capacity. This is
  * negotiation metadata, never authorization or a principal identity.
  */
 export type PluginToolFilesCapabilities = Readonly<{
   contractVersion: 3;
-  streaming: true;
-  maxBytes: number;
-  materialize: boolean;
-  export: boolean;
-  backend: PluginToolFilesBackend;
+  resource: PluginToolFilesResourceCapability;
+  projection: PluginToolFilesProjectionCapability;
 }>;
 
 /** Host-bound session resource capability exposed to plugin agent tools. */

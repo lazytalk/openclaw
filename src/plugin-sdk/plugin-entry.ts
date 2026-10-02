@@ -59,6 +59,8 @@ export type {
   PluginToolFiles,
   PluginToolFilesBackend,
   PluginToolFilesCapabilities,
+  PluginToolFilesProjectionCapability,
+  PluginToolFilesResourceCapability,
   PluginAgentEventEmitParams,
   PluginAgentEventEmitResult,
   PluginAgentEventSubscriptionRegistration,
