@@ -211,6 +211,9 @@ export function localExecutionProjection(
       const id = randomUUID();
       const dir = path.join(resolvedRoot, WORKSPACE_SUBDIR, id);
       const relativeFile = path.posix.join(WORKSPACE_SUBDIR, id, fileName);
+      // Register the destination before any write so a partial or cancelled
+      // write is still owned by run cleanup.
+      generated.add(dir);
       signal?.throwIfAborted();
       // Open the destination through the native safe-write boundary: mutations
       // reject symlinks and stay anchored to the workspace root, so a swapped
@@ -251,7 +254,11 @@ export function localExecutionProjection(
           }
         }
       } catch (error) {
+        // Close the descriptor before removing the partial directory.
+        await opened?.handle.close().catch(() => undefined);
+        opened = undefined;
         await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+        generated.delete(dir);
         throw error;
       } finally {
         await opened?.handle.close().catch(() => undefined);
@@ -301,38 +308,57 @@ export function bridgeProjection(
     }
     return resolved;
   };
-  // A streaming bridge keeps the resource ceiling; a buffered fallback reports
-  // its own bounded ceiling instead of silently accepting whole-file buffers.
-  const bounded = bridge.writeFileStream && bridge.readFileStream;
-  const projectionMaxBytes = bounded
+  // Derive each direction's ceiling from the primitive it actually uses: a
+  // streaming primitive keeps the resource ceiling; a whole-file fallback reports
+  // its own bounded ceiling instead of silently accepting a whole-file buffer.
+  // (Export may also stream through a local host backing path, but the bridge
+  // advertises the conservative bridge-derived value.)
+  const materializeCeiling = bridge.writeFileStream
+    ? maxBytes
+    : Math.min(maxBytes, DEFAULT_BUFFERED_PROJECTION_MAX_BYTES);
+  const exportCeiling = bridge.readFileStream
     ? maxBytes
     : Math.min(maxBytes, DEFAULT_BUFFERED_PROJECTION_MAX_BYTES);
   return {
     backend: "sandbox",
-    materializeMaxBytes: projectionMaxBytes,
-    exportMaxBytes: projectionMaxBytes,
+    materializeMaxBytes: materializeCeiling,
+    exportMaxBytes: exportCeiling,
     async createFromStream(fileName, stream, signal) {
       assertPlainFileName(fileName);
       const relativePath = path.posix.join(WORKSPACE_SUBDIR, randomUUID(), fileName);
       signal?.throwIfAborted();
       const resolved = confine(relativePath);
-      let size: number;
-      if (bridge.writeFileStream) {
-        size = await bridge.writeFileStream({
-          filePath: relativePath,
-          cwd,
-          stream,
-          mkdir: true,
-          maxBytes: projectionMaxBytes,
-          signal,
-        });
-      } else {
-        const bytes = await collectBounded(stream, projectionMaxBytes, signal);
-        signal?.throwIfAborted();
-        await bridge.writeFile({ filePath: relativePath, cwd, data: bytes, mkdir: true, signal });
-        size = bytes.byteLength;
-      }
+      // Register the destination before any write so a partial or cancelled
+      // write is still owned by run cleanup.
       generated.add(resolved);
+      let size: number;
+      try {
+        if (bridge.writeFileStream) {
+          size = await bridge.writeFileStream({
+            filePath: relativePath,
+            cwd,
+            stream,
+            mkdir: true,
+            maxBytes: materializeCeiling,
+            signal,
+          });
+        } else {
+          const bytes = await collectBounded(stream, materializeCeiling, signal);
+          signal?.throwIfAborted();
+          await bridge.writeFile({
+            filePath: relativePath,
+            cwd,
+            data: bytes,
+            mkdir: true,
+            signal,
+          });
+          size = bytes.byteLength;
+        }
+      } catch (error) {
+        await bridge.remove({ filePath: resolved, cwd, force: true }).catch(() => undefined);
+        generated.delete(resolved);
+        throw error;
+      }
       return { workspacePath: resolved, size };
     },
     async *openReadStream(filePath, limit, signal) {
@@ -356,12 +382,12 @@ export function bridgeProjection(
         yield* bridge.readFileStream({
           filePath: resolved,
           cwd,
-          maxBytes: Math.min(limit, projectionMaxBytes),
+          maxBytes: Math.min(limit, exportCeiling),
           signal,
         });
         return;
       }
-      const boundedLimit = Math.min(limit, projectionMaxBytes);
+      const boundedLimit = Math.min(limit, exportCeiling);
       const data = await bridge.readFile({
         filePath: resolved,
         cwd,

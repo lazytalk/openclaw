@@ -78,7 +78,6 @@ export type {
 export type {
   PluginArtifact,
   PluginToolFiles,
-  PluginToolFilesBackend,
   PluginToolFilesCapabilities,
   PluginToolFilesProjectionCapability,
   PluginToolFilesResourceCapability,

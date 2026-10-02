@@ -57,7 +57,6 @@ export type {
   OpenClawPluginToolFactory,
   PluginArtifact,
   PluginToolFiles,
-  PluginToolFilesBackend,
   PluginToolFilesCapabilities,
   PluginToolFilesProjectionCapability,
   PluginToolFilesResourceCapability,

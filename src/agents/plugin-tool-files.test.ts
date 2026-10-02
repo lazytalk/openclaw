@@ -478,6 +478,78 @@ describe("plugin ctx.files adapter", () => {
     });
   });
 
+  it("removes a partial local materialization when the source stream fails", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-partial-"));
+    try {
+      const projection = localExecutionProjection(root, 1 << 20);
+      async function* failing() {
+        yield Buffer.from("partial-bytes");
+        throw new Error("source failed");
+      }
+      await expect(projection.createFromStream("p.bin", failing())).rejects.toThrow(
+        /source failed/u,
+      );
+      const leftovers = await fs
+        .readdir(path.join(root, ".openclaw-session-resources"))
+        .catch(() => [] as string[]);
+      expect(leftovers).toHaveLength(0);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a partial local materialization when the write is cancelled", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-cancel-"));
+    try {
+      const controller = new AbortController();
+      const projection = localExecutionProjection(root, 1 << 20);
+      async function* chunks() {
+        yield Buffer.alloc(64 * 1024, 1);
+        controller.abort();
+        yield Buffer.alloc(64 * 1024, 2);
+      }
+      await expect(
+        projection.createFromStream("c.bin", chunks(), controller.signal),
+      ).rejects.toThrow();
+      const leftovers = await fs
+        .readdir(path.join(root, ".openclaw-session-resources"))
+        .catch(() => [] as string[]);
+      expect(leftovers).toHaveLength(0);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("removes a partial bridge materialization when the backend write fails", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-bridge-partial-"));
+    try {
+      const base = bridgeFor(root);
+      const removed: string[] = [];
+      const bridge = {
+        ...base,
+        remove: async (params: Parameters<typeof base.remove>[0]) => {
+          removed.push(params.filePath);
+          return base.remove(params);
+        },
+        writeFileStream: async (params: { stream: AsyncIterable<Uint8Array> }) => {
+          // Consume one chunk, then fail mid-write.
+          await params.stream[Symbol.asyncIterator]().next();
+          throw new Error("backend write failed");
+        },
+      };
+      const projection = bridgeProjection(bridge, CONTAINER_ROOT, 1 << 20);
+      async function* src() {
+        yield Buffer.from("a".repeat(1024));
+      }
+      await expect(projection.createFromStream("b.bin", src())).rejects.toThrow(
+        /backend write failed/u,
+      );
+      expect(removed.some((filePath) => filePath.endsWith("b.bin"))).toBe(true);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("fails closed for projection without an execution workspace", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const files = createPluginToolFiles({
