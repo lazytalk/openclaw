@@ -21,12 +21,9 @@ import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
 import { ADMIN_SCOPE, READ_SCOPE } from "./method-scopes.js";
 import { startGatewayServer } from "./server.js";
 import { importSessionResourceStream } from "./session-resource-store.js";
-import {
-  connectGatewayClient,
-  disconnectGatewayClient,
-  getGatewayE2ePortBlock,
-} from "./test-helpers.e2e.js";
+import { connectGatewayClient, disconnectGatewayClient } from "./test-helpers.e2e.js";
 import { GATEWAY_STARTUP_MUTATED_ENV_KEYS } from "./test-helpers.env.js";
+import { acquireGatewayE2ePortBlock } from "./test-helpers.listener.js";
 
 const ENV_KEYS = [
   "HOME",
@@ -104,7 +101,11 @@ describe("Gateway session resource artifacts", () => {
     clearConfigCache();
     clearSessionStoreCacheForTest();
 
-    const port = await getGatewayE2ePortBlock();
+    const claim = await acquireGatewayE2ePortBlock();
+    cleanup.push(async () => {
+      await claim.release?.();
+    });
+    const port = claim.port;
     setTestEnvValue("OPENCLAW_GATEWAY_PORT", String(port));
     const startServer = () =>
       startGatewayServer(port, {
