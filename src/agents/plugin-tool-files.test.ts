@@ -139,6 +139,43 @@ describe("plugin ctx.files adapter", () => {
     });
   });
 
+  it("reports effective session resource capabilities for the current placement", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-caps-"));
+      try {
+        const sandboxed = createPluginToolFiles({
+          sessionKey: "agent:main:main",
+          sessionId: "sess-1",
+          agentId: "main",
+          workspace: sandboxExecutionWorkspace(bridgeFor(root), CONTAINER_ROOT, 4096),
+          maxBytes: 4096,
+        });
+        expect(sandboxed.capabilities).toEqual({
+          contractVersion: 3,
+          streaming: true,
+          maxBytes: 4096,
+          materialize: true,
+          export: true,
+          backend: "sandbox",
+        });
+        const unavailable = createPluginToolFiles({
+          sessionKey: "agent:main:main",
+          sessionId: "sess-1",
+          agentId: "main",
+          maxBytes: 4096,
+        });
+        expect(unavailable.capabilities).toMatchObject({
+          backend: "unavailable",
+          materialize: false,
+          export: false,
+          streaming: true,
+        });
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+
   it("fails closed for projection without an execution workspace", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const files = createPluginToolFiles({

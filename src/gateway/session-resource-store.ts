@@ -112,8 +112,9 @@ export async function shouldReclaimSessionResource(params: {
 export async function buildManagedMediaArtifactDownload(
   record: ManagedImageRecord,
   assertCurrent?: () => void,
+  options?: { allowGeneric?: boolean },
 ): Promise<ManagedOutgoingMediaArtifactDownload | null> {
-  const kind = resolveManagedMediaKind(record.original.contentType);
+  const kind = resolveManagedMediaKind(record.original.contentType, options);
   if (!kind) {
     return null;
   }
@@ -168,8 +169,31 @@ export async function resolveSessionResourceArtifactDownload(
   });
   assertCurrent();
   return state === "retained"
-    ? await buildManagedMediaArtifactDownload(record, assertCurrent)
+    ? await buildManagedMediaArtifactDownload(record, assertCurrent, { allowGeneric: true })
     : null;
+}
+
+/**
+ * Consume a session-retained resource only while its exact owning session id is
+ * still retained by the native session store. Replacement or ambiguity (a
+ * replaced generation, an unreadable store, a missing id) is withheld as null.
+ */
+export async function withSessionResourceRead<T>(
+  record: ManagedImageRecord,
+  stateDir: string,
+  consume: () => Promise<T>,
+): Promise<T | null> {
+  const sessionId = record.sessionId ?? "";
+  if (!sessionId) {
+    return null;
+  }
+  const state = await resolveSessionRetentionState({
+    sessionKey: record.sessionKey,
+    sessionId,
+    ...(record.agentId ? { agentId: record.agentId } : {}),
+    stateDir,
+  });
+  return state === "retained" ? await consume() : null;
 }
 
 export function resolveSessionResourceMaxBytes(configured: number | undefined): number {
@@ -282,7 +306,7 @@ export async function importSessionResourceStream(params: {
       if (!contentType) {
         throw new Error("Session resource has no detectable content type");
       }
-      const kind = resolveManagedMediaKind(contentType);
+      const kind = resolveManagedMediaKind(contentType, { allowGeneric: true });
       if (!kind) {
         throw new Error("Session resource has an unsupported content type");
       }
@@ -354,7 +378,7 @@ export async function openSessionResourceStream(params: {
   ) {
     throw new Error("Session resource is not owned by the current session");
   }
-  const kind = resolveManagedMediaKind(record.original.contentType);
+  const kind = resolveManagedMediaKind(record.original.contentType, { allowGeneric: true });
   if (!kind || (parsed.family === "image") !== (kind === "image")) {
     throw new Error("Session resource kind mismatch");
   }
@@ -398,7 +422,7 @@ export function toSessionResourceMetadata(
   if (record.retentionClass !== "session") {
     return null;
   }
-  const kind = resolveManagedMediaKind(record.original.contentType);
+  const kind = resolveManagedMediaKind(record.original.contentType, { allowGeneric: true });
   if (!kind) {
     return null;
   }

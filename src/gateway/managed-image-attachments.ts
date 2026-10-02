@@ -104,6 +104,7 @@ import {
   buildManagedMediaArtifactDownload,
   resolveSessionResourceArtifactDownload,
   shouldReclaimSessionResource,
+  withSessionResourceRead,
   type SessionAvailabilityCache,
 } from "./session-resource-store.js";
 import {
@@ -963,7 +964,11 @@ export async function resolveManagedOutgoingMediaArtifactDownload(params: {
   if (requestedAgentId && recordAgentId !== requestedAgentId) {
     return null;
   }
-  const kind = resolveManagedMediaKind(record.original.contentType);
+  // Session-retained provider resources may carry generic binary content; other
+  // outgoing media keeps rejecting unknown octet-stream shells.
+  const kind = resolveManagedMediaKind(record.original.contentType, {
+    allowGeneric: record.retentionClass === "session",
+  });
   if (!kind || (parsed.family === "image") !== (kind === "image")) {
     return null;
   }
@@ -1486,130 +1491,134 @@ export async function handleManagedOutgoingMediaHttpRequest(
       sendStatus(res, 404, "not found");
       return true;
     }
-    const handled = await withManagedOutgoingMediaRead(
-      record,
-      stateDir,
-      async (assertCurrent) => {
-        const mediaKind = resolveManagedMediaKind(record.original.contentType);
-        if (!mediaKind) {
-          sendStatus(res, 404, "not found");
-          return true;
-        }
+    // Session-retained resources are owned by an exact session id, not a
+    // transcript message, so they gate on native session retention instead of
+    // transcript membership (which would 404 for messageId-less records).
+    const consume = async (assertCurrent: () => void) => {
+      const mediaKind = resolveManagedMediaKind(record.original.contentType, {
+        allowGeneric: record.retentionClass === "session",
+      });
+      if (!mediaKind) {
+        sendStatus(res, 404, "not found");
+        return true;
+      }
 
-        let opened: Awaited<ReturnType<typeof openLocalFileSafely>>;
-        try {
-          opened = await openLocalFileSafely({
-            filePath: resolveManagedImageOriginalPath(record),
-          });
-        } catch {
-          sendStatus(res, 404, "not found");
-          return true;
-        }
-        const respondNotFound = () => sendStatus(res, 404, "not found");
-        const immutableCacheControl = hasValidMediaTicket
-          ? `private, max-age=${MANAGED_OUTGOING_IMAGE_TICKET_TTL_MS / 1000}, immutable`
-          : "private, max-age=31536000, immutable";
-        const writeMediaHeaders = (
-          contentType: string,
-          filename: string | null,
-          cacheControl = immutableCacheControl,
-        ) => {
-          res.setHeader("content-type", contentType);
-          res.setHeader("x-content-type-options", "nosniff");
-          res.setHeader("referrer-policy", "no-referrer");
-          res.setHeader("cache-control", cacheControl);
-          res.setHeader(
-            "content-disposition",
-            buildManagedMediaContentDisposition(filename, contentType),
-          );
-        };
-        let byteStream = createGatewayByteStream(res, opened.handle, respondNotFound);
-        try {
-          let responseContentType = record.original.contentType || "application/octet-stream";
-          let responseFilename = record.original.filename;
-          if (variant === "thumbnail") {
-            // A full-image ticket already authorizes these original bytes; the thumbnail
-            // is a lower-fidelity representation of the same transcript attachment.
-            const thumbnail =
-              mediaKind === "image"
-                ? await readManagedImageThumbnailFromFile(opened).catch(() => null)
-                : null;
-            await byteStream.close();
-            assertCurrent?.();
-            if (!thumbnail) {
-              respondNotFound();
-              return true;
-            }
-            const sourceName = path.parse(responseFilename ?? "generated-image").name;
-            res.statusCode = 200;
-            res.setHeader("content-length", String(thumbnail.byteLength));
-            writeMediaHeaders("image/png", `${sourceName}-thumbnail.png`);
-            res.end(req.method === "HEAD" ? undefined : thumbnail);
+      let opened: Awaited<ReturnType<typeof openLocalFileSafely>>;
+      try {
+        opened = await openLocalFileSafely({
+          filePath: resolveManagedImageOriginalPath(record),
+        });
+      } catch {
+        sendStatus(res, 404, "not found");
+        return true;
+      }
+      const respondNotFound = () => sendStatus(res, 404, "not found");
+      const immutableCacheControl = hasValidMediaTicket
+        ? `private, max-age=${MANAGED_OUTGOING_IMAGE_TICKET_TTL_MS / 1000}, immutable`
+        : "private, max-age=31536000, immutable";
+      const writeMediaHeaders = (
+        contentType: string,
+        filename: string | null,
+        cacheControl = immutableCacheControl,
+      ) => {
+        res.setHeader("content-type", contentType);
+        res.setHeader("x-content-type-options", "nosniff");
+        res.setHeader("referrer-policy", "no-referrer");
+        res.setHeader("cache-control", cacheControl);
+        res.setHeader(
+          "content-disposition",
+          buildManagedMediaContentDisposition(filename, contentType),
+        );
+      };
+      let byteStream = createGatewayByteStream(res, opened.handle, respondNotFound);
+      try {
+        let responseContentType = record.original.contentType || "application/octet-stream";
+        let responseFilename = record.original.filename;
+        if (variant === "thumbnail") {
+          // A full-image ticket already authorizes these original bytes; the thumbnail
+          // is a lower-fidelity representation of the same transcript attachment.
+          const thumbnail =
+            mediaKind === "image"
+              ? await readManagedImageThumbnailFromFile(opened).catch(() => null)
+              : null;
+          await byteStream.close();
+          assertCurrent?.();
+          if (!thumbnail) {
+            respondNotFound();
             return true;
           }
+          const sourceName = path.parse(responseFilename ?? "generated-image").name;
+          res.statusCode = 200;
+          res.setHeader("content-length", String(thumbnail.byteLength));
+          writeMediaHeaders("image/png", `${sourceName}-thumbnail.png`);
+          res.end(req.method === "HEAD" ? undefined : thumbnail);
+          return true;
+        }
 
-          const isPlayback =
-            requestUrl.searchParams.get("playback") === "1" &&
-            (mediaKind === "audio" || mediaKind === "video");
-          if (isPlayback) {
-            const playback = await resolvePlaybackTranscode({
-              sourcePath: opened.realPath,
-              sourceStat: opened.stat,
-              mimeType: responseContentType,
-              kind: mediaKind,
-              signal: byteStream.signal,
-              assertCurrent,
-            });
-            if (playback.kind === "preparing") {
-              await byteStream.close();
-              assertCurrent?.();
-              sendJson(res, 202, { status: "preparing" });
-              return true;
-            }
-            if (playback.kind === "transcoded") {
-              const transcoded = await openLocalFileSafely({ filePath: playback.path }).catch(
-                () => null,
-              );
-              if (transcoded) {
-                await byteStream.close();
-                opened = transcoded;
-                byteStream = createGatewayByteStream(res, opened.handle, respondNotFound);
-                responseContentType = playback.contentType;
-                responseFilename = replacePlaybackFileExtension(
-                  responseFilename ?? "generated-media",
-                  playback.extension,
-                );
-              }
-            }
-          }
-
-          const byteResponse = resolveByteResponse({
-            file: opened.stat,
-            // Playback can replace a failed rendition with a successful one at the same URL.
-            validators: isPlayback ? undefined : createImmutableFileValidators(opened.stat),
-            method: req.method,
-            request: req,
+        const isPlayback =
+          requestUrl.searchParams.get("playback") === "1" &&
+          (mediaKind === "audio" || mediaKind === "video");
+        if (isPlayback) {
+          const playback = await resolvePlaybackTranscode({
+            sourcePath: opened.realPath,
+            sourceStat: opened.stat,
+            mimeType: responseContentType,
+            kind: mediaKind,
+            signal: byteStream.signal,
+            assertCurrent,
           });
-          // Stream from the verified descriptor so a path swap cannot bypass fs-safe after validation.
-          await byteStream.pipe(byteResponse, req.method, () => {
+          if (playback.kind === "preparing") {
+            await byteStream.close();
             assertCurrent?.();
-            writeMediaHeaders(
-              responseContentType,
-              responseFilename,
-              isPlayback ? "private, no-cache" : immutableCacheControl,
+            sendJson(res, 202, { status: "preparing" });
+            return true;
+          }
+          if (playback.kind === "transcoded") {
+            const transcoded = await openLocalFileSafely({ filePath: playback.path }).catch(
+              () => null,
             );
-            writeByteHeaders(res, byteResponse);
-          });
-        } catch (error) {
-          await byteStream.close();
-          if (!res.writableEnded && !res.destroyed) {
-            throw error;
+            if (transcoded) {
+              await byteStream.close();
+              opened = transcoded;
+              byteStream = createGatewayByteStream(res, opened.handle, respondNotFound);
+              responseContentType = playback.contentType;
+              responseFilename = replacePlaybackFileExtension(
+                responseFilename ?? "generated-media",
+                playback.extension,
+              );
+            }
           }
         }
-        return true;
-      },
-      assertCallerCurrent,
-    );
+
+        const byteResponse = resolveByteResponse({
+          file: opened.stat,
+          // Playback can replace a failed rendition with a successful one at the same URL.
+          validators: isPlayback ? undefined : createImmutableFileValidators(opened.stat),
+          method: req.method,
+          request: req,
+        });
+        // Stream from the verified descriptor so a path swap cannot bypass fs-safe after validation.
+        await byteStream.pipe(byteResponse, req.method, () => {
+          assertCurrent?.();
+          writeMediaHeaders(
+            responseContentType,
+            responseFilename,
+            isPlayback ? "private, no-cache" : immutableCacheControl,
+          );
+          writeByteHeaders(res, byteResponse);
+        });
+      } catch (error) {
+        await byteStream.close();
+        if (!res.writableEnded && !res.destroyed) {
+          throw error;
+        }
+      }
+      return true;
+    };
+    const handled =
+      record.retentionClass === "session"
+        ? await withSessionResourceRead(record, stateDir, () => consume(assertCallerCurrent))
+        : await withManagedOutgoingMediaRead(record, stateDir, consume, assertCallerCurrent);
     if (handled === null) {
       assertCallerCurrent();
       sendStatus(res, 404, "not found");

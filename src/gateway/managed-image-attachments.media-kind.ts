@@ -21,7 +21,10 @@ const MANAGED_DOCUMENT_MIME_TYPES = new Set([
   "text/plain",
 ]);
 
-export function resolveManagedMediaKind(contentType: string | undefined): ManagedMediaKind | null {
+export function resolveManagedMediaKind(
+  contentType: string | undefined,
+  options?: { allowGeneric?: boolean },
+): ManagedMediaKind | null {
   const normalized = normalizeMimeType(contentType);
   if (normalized === "image/svg+xml") {
     return null;
@@ -30,5 +33,10 @@ export function resolveManagedMediaKind(contentType: string | undefined): Manage
   if (kind === "image" || kind === "audio" || kind === "video") {
     return kind;
   }
-  return normalized && MANAGED_DOCUMENT_MIME_TYPES.has(normalized) ? "document" : null;
+  if (normalized && MANAGED_DOCUMENT_MIME_TYPES.has(normalized)) {
+    return "document";
+  }
+  // Generic session resources (Parquet, SQLite, unknown application/*) opt in
+  // explicitly; outgoing chat media keeps rejecting unknown octet-stream shells.
+  return options?.allowGeneric && normalized === "application/octet-stream" ? "document" : null;
 }

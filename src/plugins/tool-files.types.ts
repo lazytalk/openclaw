@@ -13,8 +13,26 @@ export type PluginArtifact = Readonly<{
   sha256: string;
 }>;
 
+/** Execution placement behind a delegated session resource projection. Negotiation metadata. */
+export type PluginToolFilesBackend = "sandbox" | "host" | "remote" | "cloud" | "unavailable";
+
+/**
+ * Effective limits and projection availability for the current placement. This is
+ * negotiation metadata, never authorization or a principal identity.
+ */
+export type PluginToolFilesCapabilities = Readonly<{
+  contractVersion: 3;
+  streaming: true;
+  maxBytes: number;
+  materialize: boolean;
+  export: boolean;
+  backend: PluginToolFilesBackend;
+}>;
+
 /** Host-bound session resource capability exposed to plugin agent tools. */
 export type PluginToolFiles = {
+  /** Effective limits for the current placement. Plugins select no principal or lifetime. */
+  readonly capabilities: PluginToolFilesCapabilities;
   /**
    * Stream external bytes into the current admitted session as a durable
    * session-retained resource. The caller cannot select a session or host path.

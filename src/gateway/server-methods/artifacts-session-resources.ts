@@ -14,7 +14,7 @@ function toSessionResourceArtifact(record: {
   alt: string;
   original: { contentType: string; sizeBytes: number | null; filename: string | null };
 }): ArtifactRecord | undefined {
-  const kind = resolveManagedMediaKind(record.original.contentType);
+  const kind = resolveManagedMediaKind(record.original.contentType, { allowGeneric: true });
   if (!kind) {
     return undefined;
   }

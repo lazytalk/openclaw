@@ -57,6 +57,8 @@ export type {
   OpenClawPluginToolFactory,
   PluginArtifact,
   PluginToolFiles,
+  PluginToolFilesBackend,
+  PluginToolFilesCapabilities,
   PluginAgentEventEmitParams,
   PluginAgentEventEmitResult,
   PluginAgentEventSubscriptionRegistration,

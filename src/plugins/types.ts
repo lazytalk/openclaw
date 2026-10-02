@@ -75,7 +75,12 @@ export type {
   OpenClawPluginToolFactory,
   OpenClawPluginToolOptions,
 } from "./tool-types.js";
-export type { PluginArtifact, PluginToolFiles } from "./tool-files.types.js";
+export type {
+  PluginArtifact,
+  PluginToolFiles,
+  PluginToolFilesBackend,
+  PluginToolFilesCapabilities,
+} from "./tool-files.types.js";
 export type {
   OpenClawPluginNodeHostCommand,
   OpenClawPluginNodeHostCommandAvailabilityContext,

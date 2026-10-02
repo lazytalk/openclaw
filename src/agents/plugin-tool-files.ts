@@ -14,7 +14,12 @@ import {
   resolveSessionResourceMaxBytes,
   type SessionResourceMetadata,
 } from "../gateway/session-resource-store.js";
-import type { PluginArtifact, PluginToolFiles } from "../plugins/tool-files.types.js";
+import type {
+  PluginArtifact,
+  PluginToolFiles,
+  PluginToolFilesBackend,
+  PluginToolFilesCapabilities,
+} from "../plugins/tool-files.types.js";
 import type { ExecutionWorkspaceBridge } from "./execution-workspace.js";
 
 function toArtifact(metadata: SessionResourceMetadata): PluginArtifact {
@@ -54,7 +59,19 @@ export function createPluginToolFiles(params: {
   });
   const assertCurrentProps = params.assertCurrent ? { assertCurrent: params.assertCurrent } : {};
   const effectiveMax = (requested: number | undefined) => clampBytes(requested, maxBytes);
+  // Placement is delegated: this layer only reports the effective projection
+  // capability it was handed, never how sandbox/host/remote access is performed.
+  const backend: PluginToolFilesBackend = params.workspace?.backend ?? "unavailable";
+  const capabilities: PluginToolFilesCapabilities = {
+    contractVersion: 3,
+    streaming: true,
+    maxBytes,
+    materialize: Boolean(params.workspace),
+    export: Boolean(params.workspace),
+    backend,
+  };
   const files: PluginToolFiles = {
+    capabilities,
     async importStream(input) {
       params.assertCurrent?.();
       const metadata = await importSessionResourceStream({
