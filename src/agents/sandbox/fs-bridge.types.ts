@@ -104,6 +104,26 @@ export type SandboxFsBridge = {
     signal?: AbortSignal;
   }): Promise<void>;
   /**
+   * Streams bytes into a regular file without materializing the whole resource,
+   * returning the byte count. Backends without a streaming transport must omit
+   * this rather than emulate it with a whole-file buffer.
+   */
+  writeFileStream?(params: {
+    filePath: string;
+    cwd?: string;
+    stream: AsyncIterable<Uint8Array>;
+    mkdir?: boolean;
+    maxBytes?: number;
+    signal?: AbortSignal;
+  }): Promise<number>;
+  /** Streams a regular file out, rejecting growth beyond `maxBytes` when set. */
+  readFileStream?(params: {
+    filePath: string;
+    cwd?: string;
+    maxBytes?: number;
+    signal?: AbortSignal;
+  }): AsyncIterable<Uint8Array>;
+  /**
    * Atomically creates a file only when no entry already exists at the path.
    * Backends without this capability must omit it rather than emulate it with
    * a check followed by writeFile.

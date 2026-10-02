@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
-import { sandboxExecutionWorkspace } from "./execution-workspace.js";
+import { bridgeProjection, localExecutionProjection } from "./execution-workspace.js";
 import { createPluginToolFiles } from "./plugin-tool-files.js";
 import { createSandboxFsBridgeFromResolver } from "./test-helpers/host-sandbox-fs-bridge.js";
 
@@ -37,17 +37,31 @@ function byteStream(bytes: Buffer): AsyncIterable<Uint8Array> {
   })();
 }
 
+async function findFirstFileSize(root: string): Promise<number> {
+  const entries = await fs.readdir(root, { recursive: true, withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue;
+    }
+    const stat = await fs.stat(path.join(entry.parentPath ?? root, entry.name)).catch(() => null);
+    if (stat?.isFile() && stat.size > 0) {
+      return stat.size;
+    }
+  }
+  return 0;
+}
+
 describe("plugin ctx.files adapter", () => {
   it("round-trips bytes through native custody and a sandbox workspace", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-files-"));
       try {
-        const workspace = sandboxExecutionWorkspace(bridgeFor(root), CONTAINER_ROOT, 1 << 20);
+        const projection = bridgeProjection(bridgeFor(root), CONTAINER_ROOT, 1 << 20);
         const files = createPluginToolFiles({
           sessionKey: "agent:main:main",
           sessionId: "sess-1",
           agentId: "main",
-          workspace,
+          projection,
           maxBytes: 1 << 20,
         });
         const bytes = Buffer.from("plugin-round-trip");
@@ -94,12 +108,12 @@ describe("plugin ctx.files adapter", () => {
     await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), "office365-roundtrip-"));
       try {
-        const workspace = sandboxExecutionWorkspace(bridgeFor(root), CONTAINER_ROOT, 1 << 20);
+        const projection = bridgeProjection(bridgeFor(root), CONTAINER_ROOT, 1 << 20);
         const files = createPluginToolFiles({
           sessionKey: "agent:main:main",
           sessionId: "sess-o365",
           agentId: "main",
-          workspace,
+          projection,
           maxBytes: 1 << 20,
         });
         // Microsoft Graph "download response body" -> provider stream.
@@ -147,7 +161,7 @@ describe("plugin ctx.files adapter", () => {
           sessionKey: "agent:main:main",
           sessionId: "sess-1",
           agentId: "main",
-          workspace: sandboxExecutionWorkspace(bridgeFor(root), CONTAINER_ROOT, 4096),
+          projection: bridgeProjection(bridgeFor(root), CONTAINER_ROOT, 4096),
           maxBytes: 4096,
         });
         expect(sandboxed.capabilities).toEqual({
@@ -174,6 +188,81 @@ describe("plugin ctx.files adapter", () => {
         await fs.rm(root, { recursive: true, force: true });
       }
     });
+  });
+
+  it("projects through native local execution without a sandbox bridge", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-local-"));
+      try {
+        const files = createPluginToolFiles({
+          sessionKey: "agent:main:main",
+          sessionId: "sess-local",
+          agentId: "main",
+          projection: localExecutionProjection(root, 1 << 20),
+          maxBytes: 1 << 20,
+        });
+        expect(files.capabilities.backend).toBe("host");
+        const bytes = Buffer.from("local-placement-bytes");
+        const artifact = await files.importStream({
+          stream: byteStream(bytes),
+          fileName: "local.bin",
+          contentType: "text/plain",
+        });
+        const materialized = await files.materialize({ artifactRef: artifact.artifactRef });
+        expect(materialized.backend).toBe("host");
+        expect(materialized.workspacePath.startsWith(`${root}${path.sep}`)).toBe(true);
+        expect((await fs.readFile(materialized.workspacePath)).equals(bytes)).toBe(true);
+        await fs.writeFile(path.join(root, "out.txt"), Buffer.from("local-export"));
+        const exported = await files.export({
+          workspacePath: path.join(root, "out.txt"),
+          contentType: "text/plain",
+        });
+        const opened = await files.openStream({ artifactRef: exported.artifactRef });
+        expect((await drain(opened.stream)).toString()).toBe("local-export");
+        await expect(files.export({ workspacePath: "/etc/passwd" })).rejects.toThrow(/workspace/u);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    });
+  });
+
+  it("writes the workspace file incrementally while the source stream is still open", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "plugin-stream-"));
+    try {
+      const projection = localExecutionProjection(root, 1 << 24);
+      const CHUNK = 32 * 1024;
+      const CHUNKS = 16;
+      const total = CHUNK * CHUNKS;
+      let partialSizeDuringStream = -1;
+      async function* source() {
+        for (let index = 0; index < CHUNKS; index++) {
+          yield Buffer.alloc(CHUNK, index % 251);
+          if (index === 0) {
+            const deadline = Date.now() + 2_000;
+            while (Date.now() < deadline && partialSizeDuringStream < 0) {
+              await new Promise((resolve) => {
+                setTimeout(resolve, 2);
+              });
+              partialSizeDuringStream = await findFirstFileSize(root);
+            }
+          }
+        }
+      }
+      const created = await projection.createFromStream("big.bin", source());
+      // A whole-file buffer would leave the file empty until the source ends.
+      expect(partialSizeDuringStream).toBeGreaterThan(0);
+      expect(partialSizeDuringStream).toBeLessThan(total);
+      expect(created.size).toBe(total);
+      expect((await fs.stat(created.workspacePath)).size).toBe(total);
+      const readChunks: number[] = [];
+      for await (const chunk of projection.openReadStream(created.workspacePath, 1 << 24)) {
+        readChunks.push(chunk.byteLength);
+      }
+      expect(readChunks.length).toBeGreaterThan(1);
+      expect(readChunks.reduce((sum, value) => sum + value, 0)).toBe(total);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 
   it("fails closed for projection without an execution workspace", async () => {

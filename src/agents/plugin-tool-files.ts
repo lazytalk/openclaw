@@ -20,7 +20,7 @@ import type {
   PluginToolFilesBackend,
   PluginToolFilesCapabilities,
 } from "../plugins/tool-files.types.js";
-import type { ExecutionWorkspaceBridge } from "./execution-workspace.js";
+import type { SessionResourceProjection } from "./execution-workspace.js";
 
 function toArtifact(metadata: SessionResourceMetadata): PluginArtifact {
   return {
@@ -43,7 +43,7 @@ export function createPluginToolFiles(params: {
   sessionKey: string;
   sessionId: string;
   agentId?: string;
-  workspace?: ExecutionWorkspaceBridge;
+  projection?: SessionResourceProjection;
   maxBytes?: number;
   registerRunCleanup?: (cleanup: (reason: string) => Promise<void>) => void;
   assertCurrent?: () => void;
@@ -55,19 +55,19 @@ export function createPluginToolFiles(params: {
     ...(params.agentId ? { agentId: params.agentId } : {}),
   };
   params.registerRunCleanup?.(async () => {
-    await params.workspace?.cleanup();
+    await params.projection?.cleanup?.();
   });
   const assertCurrentProps = params.assertCurrent ? { assertCurrent: params.assertCurrent } : {};
   const effectiveMax = (requested: number | undefined) => clampBytes(requested, maxBytes);
   // Placement is delegated: this layer only reports the effective projection
   // capability it was handed, never how sandbox/host/remote access is performed.
-  const backend: PluginToolFilesBackend = params.workspace?.backend ?? "unavailable";
+  const backend: PluginToolFilesBackend = params.projection?.backend ?? "unavailable";
   const capabilities: PluginToolFilesCapabilities = {
     contractVersion: 3,
     streaming: true,
     maxBytes,
-    materialize: Boolean(params.workspace),
-    export: Boolean(params.workspace),
+    materialize: Boolean(params.projection),
+    export: Boolean(params.projection),
     backend,
   };
   const files: PluginToolFiles = {
@@ -98,10 +98,8 @@ export function createPluginToolFiles(params: {
     },
     async materialize(input) {
       params.assertCurrent?.();
-      if (!params.workspace) {
-        throw new Error(
-          "Active execution workspace required for materialization; run through a supported sandbox",
-        );
+      if (!params.projection) {
+        throw new Error("Active execution workspace required for materialization");
       }
       const { metadata, stream } = await openSessionResourceStream({
         artifactRef: input.artifactRef,
@@ -110,20 +108,22 @@ export function createPluginToolFiles(params: {
         ...(input.signal ? { signal: input.signal } : {}),
         ...assertCurrentProps,
       });
-      const filePath = await params.workspace.create(metadata.fileName, stream, input.signal);
+      const created = await params.projection.createFromStream(
+        metadata.fileName,
+        stream,
+        input.signal,
+      );
       return {
-        workspacePath: filePath,
-        sandboxPath: filePath,
-        backend: params.workspace.backend,
-        size: metadata.size,
+        workspacePath: created.workspacePath,
+        sandboxPath: created.workspacePath,
+        backend: params.projection.backend,
+        size: created.size,
       };
     },
     async export(input) {
       params.assertCurrent?.();
-      if (!params.workspace) {
-        throw new Error(
-          "Active execution workspace required for export; run through a supported sandbox",
-        );
+      if (!params.projection) {
+        throw new Error("Active execution workspace required for export");
       }
       const filePath = input.workspacePath ?? input.sandboxPath;
       if (
@@ -134,7 +134,11 @@ export function createPluginToolFiles(params: {
       }
       const metadata = await importSessionResourceStream({
         ...source,
-        stream: params.workspace.read(filePath, effectiveMax(input.maxBytes), input.signal),
+        stream: params.projection.openReadStream(
+          filePath,
+          effectiveMax(input.maxBytes),
+          input.signal,
+        ),
         fileName: input.fileName ?? path.posix.basename(filePath.replace(/\\/gu, "/")),
         contentType: input.contentType ?? mimeTypeFromFilePath(filePath),
         maxBytes: effectiveMax(input.maxBytes),

@@ -1,28 +1,79 @@
 /**
- * Run-owned execution workspace projection.
+ * Session resource execution projection.
  *
  * A durable session resource is not a filesystem path. When execution needs it,
- * the resource is copied into the active execution workspace through the native
- * sandbox filesystem bridge, and generated output is read back through the same
- * confined bridge. Paths are generated; callers cannot select the workspace root.
+ * bytes are projected into the active execution workspace through the placement
+ * that owns that workspace. This layer never selects a backend: it consumes a
+ * projection provided by the host's execution placement (`AgentWorkspaceAccess`
+ * or native local execution), so Session Resource and `ctx.files` stay
+ * placement-agnostic.
+ *
+ * Providers must bound memory by the chunk size, never by the whole resource.
  */
 import { randomUUID } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
+import fs from "node:fs/promises";
 import path from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { PluginToolFilesBackend } from "../plugins/tool-files.types.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.types.js";
 
 const WORKSPACE_SUBDIR = ".openclaw-session-resources";
 
-export type ExecutionWorkspaceBridge = {
-  backend: "sandbox";
-  create(
+/** Placement-neutral projection for session-retained resources and exports. */
+export type SessionResourceProjection = {
+  /** Execution placement label reported as negotiation metadata (never authority). */
+  readonly backend: PluginToolFilesBackend;
+  /** Stream bytes into a generated workspace file; returns the execution path. */
+  createFromStream(
     fileName: string,
     stream: AsyncIterable<Uint8Array>,
     signal?: AbortSignal,
-  ): Promise<string>;
-  read(filePath: string, maxBytes: number, signal?: AbortSignal): AsyncIterable<Uint8Array>;
-  remove(filePath: string): Promise<void>;
-  cleanup(): Promise<void>;
+  ): Promise<{ workspacePath: string; size: number }>;
+  /** Stream a confined workspace file back out, bounded by `maxBytes`. */
+  openReadStream(
+    filePath: string,
+    maxBytes: number,
+    signal?: AbortSignal,
+  ): AsyncIterable<Uint8Array>;
+  /** Run-scoped cleanup of generated materials; owned by the placement. */
+  cleanup?(): Promise<void>;
 };
+
+/** Asserts a caller-supplied name is a plain filename with no separator or traversal. */
+function assertPlainFileName(fileName: string): void {
+  const hasControlCharacter = Array.from(fileName).some(
+    (character) => character.charCodeAt(0) < 32,
+  );
+  if (
+    !fileName ||
+    fileName.includes("/") ||
+    fileName.includes("\\") ||
+    fileName.includes("\0") ||
+    hasControlCharacter ||
+    fileName === "." ||
+    fileName === ".."
+  ) {
+    throw new Error("Execution workspace fileName must be a plain filename");
+  }
+}
+
+/** Counts bytes and fails past the ceiling without materializing the whole resource. */
+function countingLimit(maxBytes: number, onBytes: (total: number) => void): Transform {
+  let total = 0;
+  return new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      total += chunk.byteLength;
+      if (total > maxBytes) {
+        callback(new Error(`Execution workspace write exceeds ${maxBytes} bytes`));
+        return;
+      }
+      onBytes(total);
+      callback(null, chunk);
+    },
+  });
+}
 
 async function collectBounded(
   stream: AsyncIterable<Uint8Array>,
@@ -45,12 +96,123 @@ async function collectBounded(
   return Buffer.concat(chunks);
 }
 
-/** Confined copy-in/read-out over the active sandbox workspace. */
-export function sandboxExecutionWorkspace(
+/** Resolves a generated destination and proves it stays inside the workspace root. */
+async function resolveInsideRoot(root: string, candidate: string): Promise<string> {
+  const resolved = path.resolve(candidate);
+  const relative = path.relative(root, resolved);
+  if (
+    !relative ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error("Execution workspace path must stay inside the workspace root");
+  }
+  // Re-check containment after resolving symlinks in the destination parent so a
+  // swapped directory cannot redirect a confined write outside the workspace.
+  const parentReal = await fs.realpath(path.dirname(resolved));
+  const rootedReal = await fs.realpath(root);
+  const parentRelative = path.relative(rootedReal, parentReal);
+  if (
+    parentRelative === ".." ||
+    parentRelative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(parentRelative)
+  ) {
+    throw new Error("Execution workspace path must stay inside the workspace root");
+  }
+  return resolved;
+}
+
+function confineAgainstRoot(root: string, filePath: string): string {
+  if (filePath.split(/[\\/]/u).includes("..")) {
+    throw new Error("Session resource path traversal outside the execution workspace is forbidden");
+  }
+  const resolved = path.resolve(root, filePath);
+  const relative = path.relative(root, resolved);
+  if (
+    !relative ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error("Session resource export must stay inside the active execution workspace");
+  }
+  return resolved;
+}
+
+/**
+ * Native local execution projection: the execution host owns the workspace root,
+ * so the copy streams host-to-host with no whole-file buffer.
+ */
+export function localExecutionProjection(
+  root: string,
+  maxBytes: number,
+): SessionResourceProjection {
+  const resolvedRoot = path.resolve(root);
+  const generated = new Set<string>();
+  return {
+    backend: "host",
+    async createFromStream(fileName, stream, signal) {
+      assertPlainFileName(fileName);
+      const dir = path.join(resolvedRoot, WORKSPACE_SUBDIR, randomUUID());
+      await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+      const destination = await resolveInsideRoot(resolvedRoot, path.join(dir, fileName));
+      signal?.throwIfAborted();
+      let size = 0;
+      try {
+        await pipeline(
+          Readable.from(stream),
+          countingLimit(maxBytes, (total) => {
+            size = total;
+          }),
+          createWriteStream(destination, { mode: 0o600 }),
+          { signal },
+        );
+      } catch (error) {
+        await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+        throw error;
+      }
+      generated.add(dir);
+      return { workspacePath: destination, size };
+    },
+    async *openReadStream(filePath, limit, signal) {
+      const resolved = confineAgainstRoot(resolvedRoot, filePath);
+      signal?.throwIfAborted();
+      const opened = createReadStream(resolved);
+      let total = 0;
+      try {
+        for await (const chunk of opened) {
+          signal?.throwIfAborted();
+          const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+          total += bytes.byteLength;
+          if (total > limit) {
+            throw new Error("Workspace file exceeds byte limit");
+          }
+          yield bytes;
+        }
+      } finally {
+        opened.destroy();
+      }
+    },
+    async cleanup() {
+      for (const dir of generated) {
+        await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      }
+      generated.clear();
+    },
+  };
+}
+
+/**
+ * Bridge-owned projection for a non-local placement. Streams through the
+ * placement bridge when it exposes streaming primitives; otherwise it reuses the
+ * bridge's bounded whole-file transfer.
+ */
+export function bridgeProjection(
   bridge: SandboxFsBridge,
   cwd: string,
   maxBytes: number,
-): ExecutionWorkspaceBridge {
+): SessionResourceProjection {
   const generated = new Set<string>();
   const confine = (filePath: string): string => {
     if (filePath.split(/[\\/]/u).includes("..")) {
@@ -72,18 +234,37 @@ export function sandboxExecutionWorkspace(
   };
   return {
     backend: "sandbox",
-    async create(fileName, stream, signal) {
+    async createFromStream(fileName, stream, signal) {
+      assertPlainFileName(fileName);
       const relativePath = path.posix.join(WORKSPACE_SUBDIR, randomUUID(), fileName);
-      const bytes = await collectBounded(stream, maxBytes, signal);
       signal?.throwIfAborted();
-      await bridge.writeFile({ filePath: relativePath, cwd, data: bytes, mkdir: true, signal });
       const resolved = confine(relativePath);
+      let size: number;
+      if (bridge.writeFileStream) {
+        size = await bridge.writeFileStream({
+          filePath: relativePath,
+          cwd,
+          stream,
+          mkdir: true,
+          maxBytes,
+          signal,
+        });
+      } else {
+        const bytes = await collectBounded(stream, maxBytes, signal);
+        signal?.throwIfAborted();
+        await bridge.writeFile({ filePath: relativePath, cwd, data: bytes, mkdir: true, signal });
+        size = bytes.byteLength;
+      }
       generated.add(resolved);
-      return resolved;
+      return { workspacePath: resolved, size };
     },
-    async *read(filePath, limit, signal) {
+    async *openReadStream(filePath, limit, signal) {
       const resolved = confine(filePath);
       signal?.throwIfAborted();
+      if (bridge.readFileStream) {
+        yield* bridge.readFileStream({ filePath: resolved, cwd, maxBytes: limit, signal });
+        return;
+      }
       const data = await bridge.readFile({ filePath: resolved, cwd, maxBytes: limit, signal });
       signal?.throwIfAborted();
       if (data.byteLength > limit) {
@@ -91,30 +272,29 @@ export function sandboxExecutionWorkspace(
       }
       yield data;
     },
-    async remove(filePath) {
-      const resolved = confine(filePath);
-      if (!generated.has(resolved)) {
-        throw new Error("Only generated materialization paths may be removed");
-      }
-      await bridge.remove({ filePath: resolved, cwd, force: true });
-      generated.delete(resolved);
-    },
     async cleanup() {
-      const paths = [...generated];
-      for (const filePath of paths) {
-        await this.remove(filePath);
+      for (const containerPath of generated) {
+        await bridge.remove({ filePath: containerPath, cwd, force: true }).catch(() => undefined);
       }
+      generated.clear();
     },
   };
 }
 
-export function resolveExecutionWorkspace(params: {
-  sandboxed?: boolean;
+/**
+ * Resolve the projection for the current placement. The host supplies the
+ * decided placement; this helper only adapts it and is not consulted by the
+ * Session Resource custody layer.
+ */
+export function resolveSessionResourceProjection(params: {
   bridge?: SandboxFsBridge;
   cwd?: string;
+  workspaceRoot?: string;
   maxBytes: number;
-}): ExecutionWorkspaceBridge | undefined {
-  return params.sandboxed && params.bridge && params.cwd
-    ? sandboxExecutionWorkspace(params.bridge, params.cwd, params.maxBytes)
-    : undefined;
+}): SessionResourceProjection | undefined {
+  if (params.bridge && params.cwd) {
+    return bridgeProjection(params.bridge, params.cwd, params.maxBytes);
+  }
+  const root = params.workspaceRoot?.trim();
+  return root ? localExecutionProjection(root, params.maxBytes) : undefined;
 }

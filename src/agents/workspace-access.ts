@@ -13,6 +13,7 @@ import type {
   WorkspaceSkillSources,
 } from "../skills/loading/workspace-skill-sources.types.js";
 import type { SkillResourceSourceReader } from "../skills/types.js";
+import type { SessionResourceProjection } from "./execution-workspace.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.types.js";
 import type { LocalAttachmentExecutionContext } from "./workspace-attachments.local.js";
 
@@ -64,6 +65,12 @@ export type AgentWorkspaceAccess = {
     turn: WorkspaceAttachmentTurn,
     assertCurrent: () => void,
   ) => Promise<string | undefined>;
+  /**
+   * Backend-owned streaming projection for session-retained resources. Supplying
+   * it lets Session Resource stay placement-agnostic while the execution backend
+   * owns the physical copy.
+   */
+  sessionResources?: SessionResourceProjection;
 };
 
 type WorkspaceBinding = { access?: AgentWorkspaceAccess; active: boolean };
@@ -147,6 +154,27 @@ export function registerAgentWorkspaceAccess(
     bridge.readDirectory = guardCall(readDirectory);
   }
   const boundAccess: AgentWorkspaceAccess = { bridge: Object.freeze(bridge) };
+  const sessionResources = access.sessionResources;
+  if (sessionResources) {
+    boundAccess.sessionResources = Object.freeze<SessionResourceProjection>({
+      backend: sessionResources.backend,
+      createFromStream: guardCall(
+        (...args: Parameters<SessionResourceProjection["createFromStream"]>) =>
+          sessionResources.createFromStream(...args),
+      ),
+      openReadStream: (filePath, maxBytes, signal) =>
+        (async function* guardedReadStream() {
+          assertCurrent();
+          for await (const chunk of sessionResources.openReadStream(filePath, maxBytes, signal)) {
+            assertCurrent();
+            yield chunk;
+          }
+        })(),
+      ...(sessionResources.cleanup
+        ? { cleanup: guardCall(() => sessionResources.cleanup!()) }
+        : {}),
+    });
+  }
   const outboundMedia = access.outboundMedia;
   if (outboundMedia) {
     const readFile = outboundMedia.readFile.bind(outboundMedia);

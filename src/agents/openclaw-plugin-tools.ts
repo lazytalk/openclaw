@@ -26,7 +26,7 @@ import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import { resolveApiKeyForProfile, resolveAuthProfileOrder } from "./auth-profiles.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
 import { bindRequesterOwnerIdentity } from "./cron-creator-authority-context.js";
-import { resolveExecutionWorkspace } from "./execution-workspace.js";
+import { resolveSessionResourceProjection } from "./execution-workspace.js";
 import {
   createRuntimeProviderAuthLookup,
   hasRuntimeAvailableProviderAuth,
@@ -45,6 +45,7 @@ import { createArtifactTools } from "./tools/artifact-tools.js";
 import type { AnyAgentTool } from "./tools/common.js";
 import { captureGatewayToolCallerAssertion } from "./tools/gateway-caller-context.js";
 import { hasProviderAuthForTool } from "./tools/model-config.helpers.js";
+import { getAgentWorkspaceAccess } from "./workspace-access.js";
 
 type ResolveOpenClawPluginToolsOptions = OpenClawPluginToolOptions & {
   preparedModelRuntime?: PreparedModelRuntimeSnapshot;
@@ -345,14 +346,22 @@ export function resolveOpenClawPluginToolsForOptions(params: {
     : assertCallerCurrent;
   const context = pluginToolInputs.context;
   const sessionResourceMaxBytes = availabilityConfig?.tools?.sessionResources?.maxBytes;
-  const executionWorkspace =
+  // The execution placement decides the projection: a bound workspace owner
+  // supplies its own, otherwise the host resolves bridge/local placement. The
+  // Session Resource layer never inspects sandbox/host itself.
+  const placementAccess = context.workspaceDir
+    ? getAgentWorkspaceAccess(context.workspaceDir)
+    : undefined;
+  const projection =
     context.sessionKey && context.sessionId
-      ? resolveExecutionWorkspace({
-          sandboxed: params.options?.sandboxed,
-          bridge: params.options?.sandboxFsBridge,
-          cwd: params.options?.sandboxContainerWorkdir,
-          maxBytes: resolveSessionResourceMaxBytes(sessionResourceMaxBytes),
-        })
+      ? placementAccess
+        ? placementAccess.sessionResources
+        : resolveSessionResourceProjection({
+            bridge: params.options?.sandboxFsBridge,
+            cwd: params.options?.sandboxContainerWorkdir,
+            workspaceRoot: params.options?.fsPolicy?.root ?? context.workspaceDir,
+            maxBytes: resolveSessionResourceMaxBytes(sessionResourceMaxBytes),
+          })
       : undefined;
   const files =
     context.sessionKey && context.sessionId
@@ -360,7 +369,7 @@ export function resolveOpenClawPluginToolsForOptions(params: {
           sessionKey: context.sessionKey,
           sessionId: context.sessionId,
           ...(context.agentId ? { agentId: context.agentId } : {}),
-          ...(executionWorkspace ? { workspace: executionWorkspace } : {}),
+          ...(projection ? { projection } : {}),
           ...(sessionResourceMaxBytes !== undefined ? { maxBytes: sessionResourceMaxBytes } : {}),
           ...(params.options?.registerRunCleanup
             ? { registerRunCleanup: params.options.registerRunCleanup }
@@ -399,7 +408,7 @@ export function resolveOpenClawPluginToolsForOptions(params: {
   for (const tool of pluginTools) {
     existingToolNames.add(tool.name);
   }
-  if (files && executionWorkspace) {
+  if (files && projection) {
     const artifactTools = createArtifactTools(files);
     for (const tool of artifactTools) {
       existingToolNames.add(tool.name);
