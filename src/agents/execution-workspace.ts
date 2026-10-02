@@ -281,6 +281,104 @@ export function bridgeProjection(
   };
 }
 
+/** Container path where the placement projected `hostRoot` read-only, if any. */
+export function resolveProjectedMount(
+  bridge: SandboxFsBridge,
+  hostRoot: string,
+): string | undefined {
+  const target = path.resolve(hostRoot);
+  return bridge.pathMappings?.find((mapping) => path.resolve(mapping.hostRoot) === target)
+    ?.containerRoot;
+}
+
+/**
+ * Sandbox projection over a placement-owned read-only resource mount.
+ *
+ * The canonical bytes are staged host-side with a streaming copy, then the
+ * placement bridge copies them into the writable execution workspace with its
+ * native copy. This avoids both whole-file Buffering and command-stdin
+ * streaming. The caller must only use this when `resolveProjectedMount` proves
+ * the staging root is projected into the sandbox.
+ */
+export function mountedResourceCopyProjection(params: {
+  bridge: SandboxFsBridge;
+  cwd: string;
+  maxBytes: number;
+  projectedRoot: string;
+  projectedMount: string;
+}): SessionResourceProjection {
+  const { bridge, cwd, maxBytes, projectedRoot, projectedMount } = params;
+  const copyFile = bridge.copyFile?.bind(bridge);
+  if (!copyFile) {
+    throw new Error("Placement mount projection requires a native copy primitive");
+  }
+  const base = bridgeProjection(bridge, cwd, maxBytes);
+  const stagedHostDirs = new Set<string>();
+  const confine = (filePath: string): string => {
+    if (filePath.split(/[\\/]/u).includes("..")) {
+      throw new Error(
+        "Session resource path traversal outside the execution workspace is forbidden",
+      );
+    }
+    const resolved = bridge.resolvePath({ filePath, cwd }).containerPath;
+    const relative = path.posix.relative(cwd, resolved);
+    if (
+      !relative ||
+      relative === ".." ||
+      relative.startsWith("../") ||
+      path.posix.isAbsolute(relative)
+    ) {
+      throw new Error("Session resource export must stay inside the active execution workspace");
+    }
+    return resolved;
+  };
+  return {
+    backend: base.backend,
+    async createFromStream(fileName, stream, signal) {
+      assertPlainFileName(fileName);
+      const id = randomUUID();
+      const hostDir = path.join(projectedRoot, id);
+      const hostFile = path.join(hostDir, fileName);
+      await fs.mkdir(hostDir, { recursive: true, mode: 0o700 });
+      stagedHostDirs.add(hostDir);
+      let size = 0;
+      const relativePath = path.posix.join(WORKSPACE_SUBDIR, randomUUID(), fileName);
+      try {
+        signal?.throwIfAborted();
+        await pipeline(
+          Readable.from(stream),
+          countingLimit(maxBytes, (total) => {
+            size = total;
+          }),
+          createWriteStream(hostFile, { mode: 0o600 }),
+          { signal },
+        );
+        signal?.throwIfAborted();
+        await copyFile({
+          sourcePath: path.posix.join(projectedMount, id, fileName),
+          destinationPath: relativePath,
+          cwd,
+          mkdir: true,
+          signal,
+        });
+      } catch (error) {
+        await fs.rm(hostDir, { recursive: true, force: true }).catch(() => undefined);
+        stagedHostDirs.delete(hostDir);
+        throw error;
+      }
+      return { workspacePath: confine(relativePath), size };
+    },
+    openReadStream: (filePath, limit, signal) => base.openReadStream(filePath, limit, signal),
+    async cleanup() {
+      await base.cleanup?.();
+      for (const hostDir of stagedHostDirs) {
+        await fs.rm(hostDir, { recursive: true, force: true }).catch(() => undefined);
+      }
+      stagedHostDirs.clear();
+    },
+  };
+}
+
 /**
  * Resolve the projection for the current placement. The host supplies the
  * decided placement; this helper only adapts it and is not consulted by the
@@ -290,9 +388,24 @@ export function resolveSessionResourceProjection(params: {
   bridge?: SandboxFsBridge;
   cwd?: string;
   workspaceRoot?: string;
+  /** Placement-owned host root projected read-only into the sandbox, when present. */
+  projectedRoot?: string;
   maxBytes: number;
 }): SessionResourceProjection | undefined {
   if (params.bridge && params.cwd) {
+    const projectedRoot = params.projectedRoot?.trim();
+    if (projectedRoot) {
+      const mount = resolveProjectedMount(params.bridge, projectedRoot);
+      if (mount) {
+        return mountedResourceCopyProjection({
+          bridge: params.bridge,
+          cwd: params.cwd,
+          maxBytes: params.maxBytes,
+          projectedRoot,
+          projectedMount: mount,
+        });
+      }
+    }
     return bridgeProjection(params.bridge, params.cwd, params.maxBytes);
   }
   const root = params.workspaceRoot?.trim();
